@@ -1,0 +1,12 @@
+# Keep the build context clean: without this, `COPY . .` in the Dockerfile
+# copied the host's node_modules (platform-mismatched binaries) over the
+# freshly-installed one, plus any local env files and build output.
+node_modules
+node_modules.old*
+dist
+.env
+.env.*
+*.bak
+e2e
+test-results
+playwright-report

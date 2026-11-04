@@ -1,0 +1,253 @@
+# Database moved OFF Render (2026-08): Render's free PostgreSQL expires 30
+# days after creation and is then permanently deleted (14-day grace). The app
+# now uses a Neon (neon.tech) free-plan Postgres instead — serverless, no
+# expiry, auto-wake in ~milliseconds, pgvector available. DATABASE_URL is set
+# manually on the service (sync: false below) to the Neon DIRECT connection
+# string (the one WITHOUT "-pooler" in the host — Prisma migrations need a
+# direct connection) including ?sslmode=require.
+# The old block is kept for reference; re-enabling it would recreate an
+# expiring free database, so don't.
+# databases:
+#   - name: crm-itdesk-db
+#     databaseName: crm_itdesk
+#     user: crmuser
+#     plan: free
+
+services:
+  # ─── Backend API ──────────────────────────────────────────────────────────
+  - type: web
+    name: crm-itdesk-server
+    runtime: node
+    rootDir: server
+    plan: free
+    # --include=dev: NODE_ENV=production is set below, and npm honors that
+    # during install too (not just at runtime) — silently pruning devDependencies,
+    # which is where every @types/* package used for type-checking lives.
+    # tsc itself still ran (it's a devDependency too, so it clearly wasn't
+    # pruned wholesale), which points to npm workspaces' hoisting picking
+    # inconsistently which dev-only packages survive under production mode —
+    # forcing --include=dev removes the ambiguity entirely.
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false   # Neon direct connection string, incl. ?sslmode=require — see note at top
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+      - key: CORS_ORIGIN
+        sync: false   # set manually to your frontend URL
+      - key: FRONTEND_URL
+        sync: false   # set manually to your frontend URL
+      # Shared secret for POST /api/demo/reset (server/src/modules/demo) —
+      # the nightly re-seed of the public showcase org, called by
+      # .github/workflows/reset-demo.yml. Generate any long random string
+      # and set the *same* value here and as the DEMO_RESET_SECRET secret
+      # in the GitHub repo (Settings → Secrets and variables → Actions).
+      # Leave unset to disable the reset endpoint entirely (it 404s).
+      - key: DEMO_RESET_SECRET
+        sync: false
+      # Shared secret for POST /api/directory/sync-all
+      # (server/src/modules/directory) — the daily Entra ID directory sync
+      # (phase 3 of AD-EntraID-Integration-Plan.md), called by
+      # .github/workflows/directory-sync.yml. Generate any long random
+      # string and set the *same* value here and as the
+      # DIRECTORY_SYNC_SECRET secret in the GitHub repo (Settings → Secrets
+      # and variables → Actions). Leave unset to disable the endpoint
+      # entirely (it 404s) — orgs can still use the "Sync Now" button in
+      # Single Sign-On settings either way, since that's authenticated by
+      # the admin's own login instead.
+      - key: DIRECTORY_SYNC_SECRET
+        sync: false
+      # Shared secret for POST /api/platform/bootstrap
+      # (server/src/modules/platform-admin) — creates/promotes the one
+      # cross-org PLATFORM_ADMIN login used to view every org's plan,
+      # branding, and email/WhatsApp sending-connection status in one place.
+      # Set any long random string, call the endpoint once with it (see the
+      # curl example in the white-label/licensing plan doc), then treat that
+      # secret as sensitive going forward — anyone with it can create a
+      # platform-admin account. Leave unset to disable the endpoint (404s).
+      - key: PLATFORM_BOOTSTRAP_SECRET
+        sync: false
+      # Where "new org signup" approval-request emails go (register() in
+      # auth.controller.ts). Code falls back to this same address if the env
+      # var is ever unset, so this line is just documentation/override — no
+      # manual dashboard step needed unless you want a different inbox.
+      - key: ADMIN_NOTIFY_EMAIL
+        value: zenkara360superadmin@gmail.com
+      # Every AI feature in the app (lead scoring, ticket sentiment, the AI
+      # Command Bar, AI Studio, the "Generate setup" flow, all of it) checks
+      # for GROQ_API_KEY first, then falls back to OPENAI_API_KEY, then
+      # returns a "not configured" response with neither set. This was never
+      # in the Blueprint before now, so on a fresh deploy every AI feature
+      # is silently a no-op until one of these two is filled in manually.
+      # Groq's free tier is the cheaper way to get this working — a key from
+      # console.groq.com is enough, OPENAI_API_KEY isn't required alongside it.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # Model overrides — providers retire models on their own schedule (Groq
+      # decommissioned both previous defaults on 2026-08-16). If AI calls start
+      # failing with a "model decommissioned" error, set the replacement model
+      # IDs here in the dashboard and the fix applies on restart, no deploy.
+      - key: AI_MODEL_FAST
+        sync: false
+      - key: AI_MODEL_SMART
+        sync: false
+      # SMTP fallback (mailer.ts) — only reached when RESEND_API_KEY below is
+      # unset. Kept for local dev / a paid Render plan, but on THIS service's
+      # free plan Render blocks all outbound SMTP traffic (25/465/587)
+      # outright, so these alone won't actually deliver mail here — see
+      # RESEND_API_KEY.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: '587'
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # Render's free web-service plan blocks outbound SMTP entirely — mail
+      # goes through Resend's HTTPS API instead (mailer.ts prefers this over
+      # SMTP whenever it's set). Get a key from resend.com, verify your
+      # sending domain there, then set this.
+      - key: RESEND_API_KEY
+        sync: false
+      # Optional — defaults to SMTP_FROM, then to Resend's shared test
+      # address if neither is set. Only needed if you want a different
+      # "from" identity for Resend specifically.
+      - key: RESEND_FROM
+        sync: false
+      # Platform-owned Twilio WhatsApp account — utils/whatsapp.ts's
+      # sendWhatsApp() falls back to this for orgs that haven't connected
+      # their own WhatsApp number (Inbox → Settings), same "org's own first,
+      # platform's as fallback" pattern as RESEND_API_KEY above. Leave unset
+      # to disable the fallback — those orgs just get a clear error instead.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      # The backend's own public URL — used wherever the code needs to build
+      # a link back to itself rather than to the frontend: CSAT survey links
+      # (mailer.ts) and, now, the Google OAuth redirect_uri (storage.controller.ts)
+      # that Google's consent screen sends the browser back to after
+      # approval. Must be internet-reachable, not localhost. Defaulting to
+      # this service's own Render URL since it's already known here.
+      - key: APP_URL
+        value: https://crm-itdesk-server.onrender.com
+      # Attachments' "connect your own Drive" feature (storage.controller.ts /
+      # utils/googleDrive.ts). Create an OAuth 2.0 Client ID (Web application
+      # type) in Google Cloud Console, enable the Google Drive API for that
+      # project, and add {APP_URL}/api/storage/google/callback as an
+      # authorized redirect URI. Until both of these are set, Settings →
+      # Storage tells the user Google Drive isn't configured rather than
+      # erroring at connect time.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # "Use our hosted storage" — the alternative to bring-your-own Drive,
+      # available to Pro (5GB) and Enterprise (50GB) plans only; see
+      # PLANS.storageQuotaGB in utils/stripe.ts. Any S3-compatible bucket
+      # works. Cloudflare R2 is the cheapest option (no egress fees) — create
+      # a bucket + API token at dash.cloudflare.com/?to=/:account/r2, then:
+      #   S3_ENDPOINT = https://<account-id>.r2.cloudflarestorage.com
+      #   S3_REGION   = auto
+      # For real AWS S3 instead, leave S3_ENDPOINT unset and set S3_REGION to
+      # the bucket's actual region (e.g. us-east-1). Until S3_BUCKET/
+      # S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY are all set, Settings → Storage
+      # only offers Google Drive, regardless of plan.
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: auto
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      # Real browser/OS push notifications (utils/webPush.ts + the
+      # NotificationBell "Enable push" toggle) — separate from the in-app
+      # SSE/polling notifications, which only work while a tab is open.
+      # Generate a keypair with `npx web-push generate-vapid-keys` and paste
+      # the two values in below. Until both are set, /push/vapid-public-key
+      # 404s and the client-side toggle silently no-ops rather than erroring
+      # — same "off by default" pattern as GROQ_API_KEY/RESEND_API_KEY.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      # Stripe billing (utils/stripe.ts + modules/billing) — without these,
+      # checkout/portal creation fails and the /api/billing/webhook can't
+      # verify events, so paid-plan upgrades/downgrades never apply. Get the
+      # secret key from dashboard.stripe.com → Developers → API keys, the
+      # webhook signing secret from the webhook endpoint you register there
+      # (point it at {APP_URL}/api/billing/webhook), and the two price IDs
+      # from the Products page. All four were previously missing from this
+      # Blueprint — billing was silently non-functional on a fresh deploy.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRO_PRICE_ID
+        sync: false
+      - key: STRIPE_ENTERPRISE_PRICE_ID
+        sync: false
+      # Signs the X-Webhook-Signature header on OUTBOUND workflow webhooks
+      # (utils/workflow-engine.ts) so receivers can verify calls really came
+      # from this server. Unset = webhooks go out unsigned. Any long random
+      # string works; share it with whoever consumes the webhooks.
+      - key: WORKFLOW_WEBHOOK_SECRET
+        sync: false
+      # Signs public quote/invoice e-signature share links. If unset the code
+      # falls back to JWT_SECRET — which works, but then rotating JWT_SECRET
+      # silently invalidates every outstanding share link, so give it its own
+      # long random value.
+      - key: QUOTE_SHARE_SECRET
+        sync: false
+      # Contact address the push service (FCM/Mozilla's autopush/etc.) may
+      # use to reach you about this VAPID identity — required format is
+      # "mailto:you@example.com". Defaults to a placeholder if unset.
+      - key: VAPID_SUBJECT
+        sync: false
+
+  # ─── Frontend (Static Site) ───────────────────────────────────────────────
+  - type: web
+    name: crm-itdesk-client
+    runtime: static
+    rootDir: client
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      # Render substitutes the wildcard with `*` in the destination — NOT
+      # `:splat` (that's Netlify syntax, which Render forwards literally,
+      # turning every API call into "POST /api/:splat" → 404. That one
+      # character difference took down every login for two days.)
+      - type: rewrite
+        source: /api/*
+        destination: https://crm-itdesk-server.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: /api
+      # Same value as the server's GOOGLE_CLIENT_ID — shows "Sign in with Google".
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false

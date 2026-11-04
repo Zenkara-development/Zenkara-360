@@ -1,0 +1,1546 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════════
+   DESIGN TOKEN SYSTEM
+   Four visual themes × four fonts × light/dark.
+
+   Colour tokens are stored as bare "R G B" triples, NOT as #hex or
+   rgb(). That is deliberate: tailwind.config.js binds them with
+   `rgb(var(--ui-x) / <alpha-value>)`, which is what lets you write
+   `bg-surface/60` or `border-line/40` and have the opacity modifier
+   work. A #hex here would silently break every such utility.
+
+   Anything that needs a plain colour in this file wraps the triple
+   itself, e.g. `background: rgb(var(--ui-surface));`.
+
+   ADDING A THEME: copy a whole [data-theme] block — every theme must
+   define every token, because there is no inheritance between them,
+   only the :root fallback. Dark overrides live under `html.dark`,
+   whose (0,1,1) specificity beats any [data-theme] block regardless
+   of source order, so a new theme cannot silently lose dark mode.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Font ────────────────────────────────────────────────────────── */
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+[data-font="inter"]   { --font-sans: 'Inter', system-ui, sans-serif; }
+[data-font="jakarta"] { --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif; }
+[data-font="dm"]      { --font-sans: 'DM Sans', system-ui, sans-serif; }
+[data-font="nunito"]  { --font-sans: 'Nunito Sans', system-ui, sans-serif; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   THEME: MINIMAL (default) — "Linear-grade": near-monochrome cool
+   neutrals, hairline borders, Linear's indigo used sparingly, tight
+   crisp density. Redesigned 2026-08 against Linear/Attio references;
+   the other three themes keep their own personalities untouched.
+   ═══════════════════════════════════════════════════════════════════ */
+:root,
+[data-theme="minimal"] {
+  /* Surfaces — white work surfaces on a barely-gray canvas */
+  --ui-canvas:          250 250 251;
+  --ui-surface:         255 255 255;
+  --ui-surface-raised:  255 255 255;
+  --ui-surface-sunken:  247 247 249;
+  --ui-surface-hover:   244 245 247;
+
+  /* Lines — hairlines carry the structure, not shadows */
+  --ui-line:            232 233 237;
+  --ui-line-strong:     209 211 218;
+  --ui-line-subtle:     240 241 244;
+
+  /* Text — near-black with a cool cast, generous contrast steps */
+  --ui-fg:              24 25 32;
+  --ui-fg-muted:        96 100 112;
+  --ui-fg-subtle:       143 148 160;
+
+  /* Accent — Linear indigo #5E6AD2, reserved for actions and focus */
+  --ui-accent:          94 106 210;
+  --ui-accent-hover:    79 90 189;
+  --ui-accent-active:   67 76 160;
+  --ui-accent-fg:       255 255 255;
+  --ui-accent-soft:     238 240 252;
+  --ui-accent-soft-fg:  74 83 173;
+  --ui-accent-ring:     163 172 240;
+
+  /* Status — slightly deeper, less pastel than before */
+  --ui-success:         22 163 74;
+  --ui-success-soft:    240 250 244;
+  --ui-success-fg:      21 128 61;
+  --ui-warning:         217 119 6;
+  --ui-warning-soft:    254 249 237;
+  --ui-warning-fg:      180 83 9;
+  --ui-danger:          220 38 38;
+  --ui-danger-soft:     254 242 242;
+  --ui-danger-fg:       185 28 28;
+  --ui-info:            59 130 246;
+  --ui-info-soft:       239 246 255;
+  --ui-info-fg:         29 78 216;
+
+  /* Sidebar — Linear's quiet light rail: one shade off the canvas,
+     tinted (not solid) active state, hairline separation. html.dark
+     flips it to the dark rail below. */
+  --ui-sidebar-bg:          251 251 252;
+  --ui-sidebar-fg:          55 58 70;
+  --ui-sidebar-muted:       96 100 112;
+  --ui-sidebar-heading:     143 148 160;
+  --ui-sidebar-line:        236 237 240;
+  --ui-sidebar-hover:       242 243 245;
+  --ui-sidebar-active-bg:   238 240 252;
+  --ui-sidebar-active-fg:   74 83 173;
+
+  /* Radius scale — tighter than before; big radii read as toy-like */
+  --ui-radius-xs:    4px;
+  --ui-radius-sm:    6px;
+  --ui-radius-md:    8px;
+  --ui-radius-lg:    10px;
+  --ui-radius-xl:    14px;
+  --ui-radius-2xl:   18px;
+  --ui-radius-full:  9999px;
+
+  /* Per-element radius */
+  --ui-btn-radius:   7px;
+  --ui-input-radius: 7px;
+  --ui-card-radius:  10px;
+  --ui-badge-radius: 6px;
+  --ui-modal-radius: 14px;
+
+  /* Shadows — barely-there at rest, real depth only when floating */
+  --ui-shadow-sm:    0 1px 2px rgba(16,17,20,0.04);
+  --ui-shadow-md:    0 3px 8px -2px rgba(16,17,20,0.07), 0 1px 2px rgba(16,17,20,0.04);
+  --ui-shadow-lg:    0 12px 28px -8px rgba(16,17,20,0.12), 0 2px 6px -2px rgba(16,17,20,0.05);
+  --ui-shadow-modal: 0 28px 60px -12px rgba(16,17,20,0.22), 0 0 0 1px rgba(16,17,20,0.05);
+
+  /* Density — Linear-crisp: 32px controls, 13px control type */
+  --ui-ctl-h-xs:     24px;
+  --ui-ctl-h-sm:     28px;
+  --ui-ctl-h-md:     32px;
+  --ui-ctl-h-lg:     36px;
+  --ui-ctl-px:       12px;
+  --ui-ctl-py:       7px;
+  --ui-font-ctl:     13px;
+  --ui-card-pad:     20px;
+  --ui-row-py:       10px;
+  --ui-section-gap:  20px;
+
+  /* Shell */
+  --ui-sidebar-w:    236px;
+  --ui-topbar-h:     52px;
+
+  /* Modal chrome */
+  --ui-modal-bg:            255 255 255;
+  --ui-modal-border:        rgba(16,17,20,0.06);
+  --ui-modal-header-bg:     255 255 255;
+  --ui-modal-header-border: rgba(16,17,20,0.06);
+  --ui-modal-footer-bg:     rgba(250,250,251,0.9);
+  --ui-modal-accent-h:      0px;
+  --ui-modal-accent-bg:     transparent;
+
+  --ui-backdrop-color:      rgba(18,19,24,0.5);
+  --ui-backdrop-blur:       8px;
+
+  /* Inputs (derived from the tokens above so themes stay coherent) */
+  --ui-input-bg:            rgb(var(--ui-surface));
+  --ui-input-border:        rgb(var(--ui-line));
+  --ui-input-border-focus:  rgb(var(--ui-accent));
+  --ui-input-ring:          rgb(var(--ui-accent) / 0.14);
+  --ui-input-shadow:        0 1px 2px rgba(16,17,20,0.03);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   THEME: SKY (default) — light blue canvas, white cards, soft pastel
+   tints, a solid blue active nav pill and generous rounding. Built to
+   the 2026-11 dashboard reference. Shell extras (canvas gradient,
+   nav pill, pastel tiles) live in the "SKY SHELL" block further down.
+   ═══════════════════════════════════════════════════════════════════ */
+[data-theme="sky"] {
+  --ui-canvas:          239 246 255;
+  --ui-surface:         255 255 255;
+  --ui-surface-raised:  255 255 255;
+  --ui-surface-sunken:  244 248 254;
+  --ui-surface-hover:   237 244 255;
+
+  --ui-line:            223 232 246;
+  --ui-line-strong:     196 211 234;
+  --ui-line-subtle:     233 240 251;
+
+  --ui-fg:              21 33 62;
+  --ui-fg-muted:        86 102 136;
+  --ui-fg-subtle:       138 152 180;
+
+  --ui-accent:          37 120 235;
+  --ui-accent-hover:    26 102 214;
+  --ui-accent-active:   21 87 186;
+  --ui-accent-fg:       255 255 255;
+  --ui-accent-soft:     228 239 255;
+  --ui-accent-soft-fg:  25 94 200;
+  --ui-accent-ring:     147 190 250;
+
+  --ui-success:         22 163 74;
+  --ui-success-soft:    231 248 237;
+  --ui-success-fg:      21 128 61;
+  --ui-warning:         234 138 20;
+  --ui-warning-soft:    255 242 224;
+  --ui-warning-fg:      178 90 9;
+  --ui-danger:          229 57 70;
+  --ui-danger-soft:     255 235 237;
+  --ui-danger-fg:       188 30 46;
+  --ui-info:            59 130 246;
+  --ui-info-soft:       231 241 255;
+  --ui-info-fg:         29 78 216;
+
+  --ui-sidebar-bg:          255 255 255;
+  --ui-sidebar-fg:          33 46 80;
+  --ui-sidebar-muted:       92 108 140;
+  --ui-sidebar-heading:     140 154 182;
+  --ui-sidebar-line:        228 236 249;
+  --ui-sidebar-hover:       238 245 255;
+  --ui-sidebar-active-bg:   37 120 235;
+  --ui-sidebar-active-fg:   255 255 255;
+
+  --ui-radius-xs:    6px;
+  --ui-radius-sm:    8px;
+  --ui-radius-md:    10px;
+  --ui-radius-lg:    14px;
+  --ui-radius-xl:    18px;
+  --ui-radius-2xl:   22px;
+  --ui-radius-full:  9999px;
+
+  --ui-btn-radius:   10px;
+  --ui-input-radius: 10px;
+  --ui-card-radius:  16px;
+  --ui-badge-radius: 8px;
+  --ui-modal-radius: 20px;
+
+  /* Blue-tinted shadows read as "soft" on the pale canvas */
+  --ui-shadow-sm:    0 2px 8px -2px rgba(37,99,235,0.08), 0 1px 2px rgba(15,23,42,0.03);
+  --ui-shadow-md:    0 10px 24px -8px rgba(37,99,235,0.18), 0 2px 4px rgba(15,23,42,0.04);
+  --ui-shadow-lg:    0 18px 40px -12px rgba(37,99,235,0.22), 0 3px 8px -2px rgba(15,23,42,0.05);
+  --ui-shadow-modal: 0 30px 64px -14px rgba(30,64,175,0.28), 0 0 0 1px rgba(37,99,235,0.06);
+
+  --ui-ctl-h-xs:     26px;
+  --ui-ctl-h-sm:     30px;
+  --ui-ctl-h-md:     36px;
+  --ui-ctl-h-lg:     40px;
+  --ui-ctl-px:       14px;
+  --ui-ctl-py:       8px;
+  --ui-font-ctl:     13px;
+  --ui-card-pad:     22px;
+  --ui-row-py:       11px;
+  --ui-section-gap:  24px;
+
+  --ui-sidebar-w:    248px;
+  --ui-topbar-h:     64px;
+
+  --ui-modal-bg:            255 255 255;
+  --ui-modal-border:        rgba(37,99,235,0.08);
+  --ui-modal-header-bg:     255 255 255;
+  --ui-modal-header-border: rgba(37,99,235,0.08);
+  --ui-modal-footer-bg:     rgba(244,248,254,0.92);
+  --ui-modal-accent-h:      0px;
+  --ui-modal-accent-bg:     transparent;
+
+  --ui-backdrop-color:      rgba(15,30,70,0.38);
+  --ui-backdrop-blur:       8px;
+
+  --ui-input-bg:            rgb(var(--ui-surface));
+  --ui-input-border:        rgb(var(--ui-line));
+  --ui-input-border-focus:  rgb(var(--ui-accent));
+  --ui-input-ring:          rgb(var(--ui-accent) / 0.16);
+  --ui-input-shadow:        0 1px 2px rgba(37,99,235,0.04);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   THEME: MODERN — bold, high contrast, violet, strong depth
+   ═══════════════════════════════════════════════════════════════════ */
+[data-theme="modern"] {
+  --ui-canvas:          246 246 250;
+  --ui-surface:         255 255 255;
+  --ui-surface-raised:  255 255 255;
+  --ui-surface-sunken:  245 243 255;
+  --ui-surface-hover:   250 250 253;
+
+  --ui-line:            203 213 225;
+  --ui-line-strong:     148 163 184;
+  --ui-line-subtle:     226 232 240;
+
+  --ui-fg:              9 9 30;
+  --ui-fg-muted:        82 92 118;
+  --ui-fg-subtle:       133 143 168;
+
+  --ui-accent:          109 40 217;
+  --ui-accent-hover:    91 33 182;
+  --ui-accent-active:   76 29 149;
+  --ui-accent-fg:       255 255 255;
+  --ui-accent-soft:     243 232 255;
+  --ui-accent-soft-fg:  91 33 182;
+  --ui-accent-ring:     167 139 250;
+
+  --ui-success:         5 150 105;
+  --ui-success-soft:    236 253 245;
+  --ui-success-fg:      4 120 87;
+  --ui-warning:         217 119 6;
+  --ui-warning-soft:    255 251 235;
+  --ui-warning-fg:      180 83 9;
+  --ui-danger:          225 29 72;
+  --ui-danger-soft:     255 241 242;
+  --ui-danger-fg:       190 18 60;
+  --ui-info:            37 99 235;
+  --ui-info-soft:       239 246 255;
+  --ui-info-fg:         29 78 216;
+
+  --ui-sidebar-bg:          24 16 48;
+  --ui-sidebar-fg:          237 233 254;
+  --ui-sidebar-muted:       167 155 200;
+  --ui-sidebar-heading:     124 112 160;
+  --ui-sidebar-line:        45 32 78;
+  --ui-sidebar-hover:       45 32 78;
+  --ui-sidebar-active-bg:   109 40 217;
+  --ui-sidebar-active-fg:   255 255 255;
+
+  --ui-radius-xs:    3px;
+  --ui-radius-sm:    5px;
+  --ui-radius-md:    8px;
+  --ui-radius-lg:    11px;
+  --ui-radius-xl:    14px;
+  --ui-radius-2xl:   18px;
+  --ui-radius-full:  9999px;
+
+  --ui-btn-radius:   6px;
+  --ui-input-radius: 6px;
+  --ui-card-radius:  8px;
+  --ui-badge-radius: 4px;
+  --ui-modal-radius: 12px;
+
+  --ui-shadow-sm:    0 1px 3px 0 rgba(9,9,30,0.08), 0 1px 2px -1px rgba(9,9,30,0.06);
+  --ui-shadow-md:    0 4px 8px -2px rgba(9,9,30,0.10), 0 2px 4px -2px rgba(9,9,30,0.06);
+  --ui-shadow-lg:    0 12px 20px -4px rgba(9,9,30,0.13), 0 4px 8px -4px rgba(9,9,30,0.07);
+  --ui-shadow-modal: 0 32px 64px -12px rgba(9,9,30,0.28), 0 0 0 1px rgba(9,9,30,0.07);
+
+  --ui-ctl-h-xs:     26px;
+  --ui-ctl-h-sm:     30px;
+  --ui-ctl-h-md:     34px;
+  --ui-ctl-h-lg:     38px;
+  --ui-ctl-px:       12px;
+  --ui-ctl-py:       8px;
+  --ui-font-ctl:     13.5px;
+  --ui-card-pad:     20px;
+  --ui-row-py:       12px;
+  --ui-section-gap:  20px;
+
+  --ui-sidebar-w:    240px;
+  --ui-topbar-h:     56px;
+
+  --ui-modal-bg:            255 255 255;
+  --ui-modal-border:        rgba(9,9,30,0.08);
+  --ui-modal-header-bg:     255 255 255;
+  --ui-modal-header-border: rgba(9,9,30,0.08);
+  --ui-modal-footer-bg:     rgba(248,250,252,0.95);
+  --ui-modal-accent-h:      3px;
+  --ui-modal-accent-bg:     linear-gradient(90deg, #6d28d9 0%, #8b5cf6 50%, #6366f1 100%);
+
+  --ui-backdrop-color:      rgba(9,9,30,0.55);
+  --ui-backdrop-blur:       10px;
+
+  --ui-input-bg:            rgb(var(--ui-surface));
+  --ui-input-border:        rgb(var(--ui-line));
+  --ui-input-border-focus:  rgb(var(--ui-accent));
+  --ui-input-ring:          rgb(var(--ui-accent) / 0.18);
+  --ui-input-shadow:        0 1px 2px rgba(9,9,30,0.05);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   THEME: CLASSIC — enterprise, structured, dense, corporate blue
+   ═══════════════════════════════════════════════════════════════════ */
+[data-theme="classic"] {
+  --ui-canvas:          241 245 249;
+  --ui-surface:         255 255 255;
+  --ui-surface-raised:  255 255 255;
+  --ui-surface-sunken:  241 245 249;
+  --ui-surface-hover:   248 250 252;
+
+  --ui-line:            200 208 220;
+  --ui-line-strong:     148 163 184;
+  --ui-line-subtle:     226 232 240;
+
+  --ui-fg:              17 24 39;
+  --ui-fg-muted:        75 85 99;
+  --ui-fg-subtle:       128 140 156;
+
+  --ui-accent:          29 78 216;
+  --ui-accent-hover:    30 64 175;
+  --ui-accent-active:   30 58 138;
+  --ui-accent-fg:       255 255 255;
+  --ui-accent-soft:     239 246 255;
+  --ui-accent-soft-fg:  30 64 175;
+  --ui-accent-ring:     96 165 250;
+
+  --ui-success:         21 128 61;
+  --ui-success-soft:    240 253 244;
+  --ui-success-fg:      21 128 61;
+  --ui-warning:         180 83 9;
+  --ui-warning-soft:    255 251 235;
+  --ui-warning-fg:      146 64 14;
+  --ui-danger:          185 28 28;
+  --ui-danger-soft:     254 242 242;
+  --ui-danger-fg:       153 27 27;
+  --ui-info:            29 78 216;
+  --ui-info-soft:       239 246 255;
+  --ui-info-fg:         30 64 175;
+
+  --ui-sidebar-bg:          17 33 58;
+  --ui-sidebar-fg:          219 229 243;
+  --ui-sidebar-muted:       147 165 191;
+  --ui-sidebar-heading:     104 125 155;
+  --ui-sidebar-line:        30 50 82;
+  --ui-sidebar-hover:       30 50 82;
+  --ui-sidebar-active-bg:   29 78 216;
+  --ui-sidebar-active-fg:   255 255 255;
+
+  --ui-radius-xs:    2px;
+  --ui-radius-sm:    3px;
+  --ui-radius-md:    4px;
+  --ui-radius-lg:    6px;
+  --ui-radius-xl:    8px;
+  --ui-radius-2xl:   10px;
+  --ui-radius-full:  4px;
+
+  --ui-btn-radius:   3px;
+  --ui-input-radius: 3px;
+  --ui-card-radius:  4px;
+  --ui-badge-radius: 3px;
+  --ui-modal-radius: 4px;
+
+  --ui-shadow-sm:    0 1px 2px rgba(17,24,39,0.07);
+  --ui-shadow-md:    0 2px 4px rgba(17,24,39,0.09);
+  --ui-shadow-lg:    0 4px 8px rgba(17,24,39,0.11);
+  --ui-shadow-modal: 0 8px 24px rgba(17,24,39,0.16), 0 0 0 1px rgba(17,24,39,0.09);
+
+  /* Denser: this is the "fits more rows on screen" theme */
+  --ui-ctl-h-xs:     24px;
+  --ui-ctl-h-sm:     28px;
+  --ui-ctl-h-md:     31px;
+  --ui-ctl-h-lg:     35px;
+  --ui-ctl-px:       10px;
+  --ui-ctl-py:       6px;
+  --ui-font-ctl:     13px;
+  --ui-card-pad:     16px;
+  --ui-row-py:       9px;
+  --ui-section-gap:  16px;
+
+  --ui-sidebar-w:    232px;
+  --ui-topbar-h:     52px;
+
+  --ui-modal-bg:            255 255 255;
+  --ui-modal-border:        rgba(17,24,39,0.12);
+  --ui-modal-header-bg:     248 250 252;
+  --ui-modal-header-border: rgba(17,24,39,0.10);
+  --ui-modal-footer-bg:     #f1f5f9;
+  --ui-modal-accent-h:      0px;
+  --ui-modal-accent-bg:     transparent;
+
+  --ui-backdrop-color:      rgba(17,24,39,0.40);
+  --ui-backdrop-blur:       0px;
+
+  --ui-input-bg:            rgb(var(--ui-surface));
+  --ui-input-border:        rgb(var(--ui-line));
+  --ui-input-border-focus:  rgb(var(--ui-accent));
+  --ui-input-ring:          rgb(var(--ui-accent) / 0.12);
+  --ui-input-shadow:        inset 0 1px 2px rgba(17,24,39,0.04);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   THEME: FRIENDLY — warm, rounded, approachable, amber
+   ═══════════════════════════════════════════════════════════════════ */
+[data-theme="friendly"] {
+  --ui-canvas:          254 250 244;
+  --ui-surface:         255 253 250;
+  --ui-surface-raised:  255 255 255;
+  --ui-surface-sunken:  254 246 236;
+  --ui-surface-hover:   254 247 238;
+
+  --ui-line:            237 224 205;
+  --ui-line-strong:     214 196 170;
+  --ui-line-subtle:     245 237 224;
+
+  --ui-fg:              41 30 22;
+  --ui-fg-muted:        124 106 90;
+  --ui-fg-subtle:       166 148 130;
+
+  --ui-accent:          234 88 12;
+  --ui-accent-hover:    194 65 12;
+  --ui-accent-active:   154 52 18;
+  --ui-accent-fg:       255 255 255;
+  --ui-accent-soft:     255 237 213;
+  --ui-accent-soft-fg:  194 65 12;
+  --ui-accent-ring:     251 146 60;
+
+  --ui-success:         22 163 74;
+  --ui-success-soft:    240 253 244;
+  --ui-success-fg:      21 128 61;
+  --ui-warning:         202 138 4;
+  --ui-warning-soft:    254 252 232;
+  --ui-warning-fg:      161 98 7;
+  --ui-danger:          220 38 38;
+  --ui-danger-soft:     254 242 242;
+  --ui-danger-fg:       185 28 28;
+  --ui-info:            2 132 199;
+  --ui-info-soft:       240 249 255;
+  --ui-info-fg:         3 105 161;
+
+  --ui-sidebar-bg:          46 30 20;
+  --ui-sidebar-fg:          253 239 224;
+  --ui-sidebar-muted:       194 168 144;
+  --ui-sidebar-heading:     150 124 100;
+  --ui-sidebar-line:        70 48 32;
+  --ui-sidebar-hover:       70 48 32;
+  --ui-sidebar-active-bg:   234 88 12;
+  --ui-sidebar-active-fg:   255 255 255;
+
+  --ui-radius-xs:    6px;
+  --ui-radius-sm:    10px;
+  --ui-radius-md:    14px;
+  --ui-radius-lg:    18px;
+  --ui-radius-xl:    22px;
+  --ui-radius-2xl:   28px;
+  --ui-radius-full:  9999px;
+
+  --ui-btn-radius:   12px;
+  --ui-input-radius: 12px;
+  --ui-card-radius:  18px;
+  --ui-badge-radius: 9999px;
+  --ui-modal-radius: 22px;
+
+  --ui-shadow-sm:    0 2px 4px rgba(120,72,32,0.05);
+  --ui-shadow-md:    0 6px 12px -2px rgba(120,72,32,0.08);
+  --ui-shadow-lg:    0 14px 28px -4px rgba(120,72,32,0.10);
+  --ui-shadow-modal: 0 20px 44px -8px rgba(120,72,32,0.16), 0 0 0 1px rgba(120,72,32,0.05);
+
+  /* Airier: more breathing room than every other theme */
+  --ui-ctl-h-xs:     28px;
+  --ui-ctl-h-sm:     32px;
+  --ui-ctl-h-md:     37px;
+  --ui-ctl-h-lg:     42px;
+  --ui-ctl-px:       14px;
+  --ui-ctl-py:       9px;
+  --ui-font-ctl:     13.5px;
+  --ui-card-pad:     22px;
+  --ui-row-py:       14px;
+  --ui-section-gap:  24px;
+
+  --ui-sidebar-w:    248px;
+  --ui-topbar-h:     60px;
+
+  --ui-modal-bg:            255 252 247;
+  --ui-modal-border:        rgba(120,72,32,0.06);
+  --ui-modal-header-bg:     255 252 247;
+  --ui-modal-header-border: rgba(120,72,32,0.07);
+  --ui-modal-footer-bg:     rgba(255,248,235,0.7);
+  --ui-modal-accent-h:      4px;
+  --ui-modal-accent-bg:     linear-gradient(90deg, #ea580c, #fb923c, #fbbf24);
+
+  --ui-backdrop-color:      rgba(60,30,10,0.38);
+  --ui-backdrop-blur:       6px;
+
+  --ui-input-bg:            rgb(var(--ui-surface-raised));
+  --ui-input-border:        rgb(var(--ui-line));
+  --ui-input-border-focus:  rgb(var(--ui-accent));
+  --ui-input-ring:          rgb(var(--ui-accent) / 0.15);
+  --ui-input-shadow:        none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ACCENT RAMPS
+   tailwind.config.js binds the `brand-*` colour scale to these, so the
+   ~800 existing `bg-brand-600` / `text-brand-600` / `border-brand-200`
+   utilities already written throughout the app become theme-aware and
+   dark-aware without any of them being edited. This is why switching
+   theme now repaints the whole product rather than just modals.
+
+   Keep all 11 steps defined per theme: Tailwind emits a class for each
+   and a missing step resolves to `rgb( / 1)`, which is an invalid
+   colour and silently renders as transparent.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root,
+[data-theme="minimal"] {
+  /* Ramp centred on Linear indigo #5E6AD2 */
+  --ui-accent-50:  240 242 252;
+  --ui-accent-100: 228 231 249;
+  --ui-accent-200: 205 210 242;
+  --ui-accent-300: 173 180 232;
+  --ui-accent-400: 135 145 222;
+  --ui-accent-500: 94 106 210;
+  --ui-accent-600: 79 90 189;
+  --ui-accent-700: 67 76 160;
+  --ui-accent-800: 56 63 131;
+  --ui-accent-900: 48 54 108;
+  --ui-accent-950: 30 33 64;
+}
+[data-theme="sky"] {
+  --ui-accent-50:  239 246 255;
+  --ui-accent-100: 222 236 255;
+  --ui-accent-200: 194 219 254;
+  --ui-accent-300: 150 193 252;
+  --ui-accent-400: 96 160 248;
+  --ui-accent-500: 59 136 242;
+  --ui-accent-600: 37 120 235;
+  --ui-accent-700: 26 102 214;
+  --ui-accent-800: 26 82 172;
+  --ui-accent-900: 28 66 136;
+  --ui-accent-950: 20 40 84;
+}
+[data-theme="modern"] {
+  --ui-accent-50:  245 243 255;
+  --ui-accent-100: 237 233 254;
+  --ui-accent-200: 221 214 254;
+  --ui-accent-300: 196 181 253;
+  --ui-accent-400: 167 139 250;
+  --ui-accent-500: 139 92 246;
+  --ui-accent-600: 124 58 237;
+  --ui-accent-700: 109 40 217;
+  --ui-accent-800: 91 33 182;
+  --ui-accent-900: 76 29 149;
+  --ui-accent-950: 46 16 101;
+}
+[data-theme="classic"] {
+  --ui-accent-50:  239 246 255;
+  --ui-accent-100: 219 234 254;
+  --ui-accent-200: 191 219 254;
+  --ui-accent-300: 147 197 253;
+  --ui-accent-400: 96 165 250;
+  --ui-accent-500: 59 130 246;
+  --ui-accent-600: 37 99 235;
+  --ui-accent-700: 29 78 216;
+  --ui-accent-800: 30 64 175;
+  --ui-accent-900: 30 58 138;
+  --ui-accent-950: 23 37 84;
+}
+[data-theme="friendly"] {
+  --ui-accent-50:  255 247 237;
+  --ui-accent-100: 255 237 213;
+  --ui-accent-200: 254 215 170;
+  --ui-accent-300: 253 186 116;
+  --ui-accent-400: 251 146 60;
+  --ui-accent-500: 249 115 22;
+  --ui-accent-600: 234 88 12;
+  --ui-accent-700: 194 65 12;
+  --ui-accent-800: 154 52 18;
+  --ui-accent-900: 124 45 18;
+  --ui-accent-950: 67 20 7;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DARK MODE
+   `html.dark` is (0,1,1) — strictly more specific than any
+   [data-theme] block (0,1,0), so this wins no matter where a future
+   theme is added. Only colour tokens flip; radius, density and the
+   per-theme personality are preserved.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* The low end of each ramp inverts in dark mode. Without this, a bare
+   `bg-brand-50` (a pale tint chosen for white backgrounds) renders as
+   a near-white slab on a navy page. Explicit `dark:bg-brand-500/10`
+   overrides already in the code still win, so nothing regresses. */
+html.dark {
+  --ui-accent-50:  34 37 62;
+  --ui-accent-100: 44 48 84;
+  --ui-accent-200: 60 67 120;
+  --ui-accent-300: 79 88 150;
+}
+html.dark[data-theme="modern"] {
+  --ui-accent-50:  46 16 101;
+  --ui-accent-100: 76 29 149;
+  --ui-accent-200: 91 33 182;
+  --ui-accent-300: 109 40 217;
+}
+html.dark[data-theme="classic"] {
+  --ui-accent-50:  23 37 84;
+  --ui-accent-100: 30 58 138;
+  --ui-accent-200: 30 64 175;
+  --ui-accent-300: 29 78 216;
+}
+html.dark[data-theme="friendly"] {
+  --ui-accent-50:  67 20 7;
+  --ui-accent-100: 124 45 18;
+  --ui-accent-200: 154 52 18;
+  --ui-accent-300: 194 65 12;
+}
+html.dark {
+  /* "Linear dark": true grays with no blue wash, layered 14→22→29 */
+  --ui-canvas:          14 15 17;
+  --ui-surface:         22 23 26;
+  --ui-surface-raised:  29 30 34;
+  --ui-surface-sunken:  14 15 17;
+  --ui-surface-hover:   29 30 34;
+
+  --ui-line:            42 44 49;
+  --ui-line-strong:     62 65 72;
+  --ui-line-subtle:     30 31 35;
+
+  --ui-fg:              236 237 240;
+  --ui-fg-muted:        148 152 162;
+  --ui-fg-subtle:       100 104 114;
+
+  --ui-accent:          125 136 224;
+  --ui-accent-hover:    148 158 232;
+  --ui-accent-active:   168 177 240;
+  --ui-accent-fg:       255 255 255;
+  --ui-accent-soft:     34 37 62;
+  --ui-accent-soft-fg:  168 177 240;
+  --ui-accent-ring:     125 136 224;
+
+  --ui-success:         74 222 128;
+  --ui-success-soft:    13 40 24;
+  --ui-success-fg:      134 239 172;
+  --ui-warning:         250 204 21;
+  --ui-warning-soft:    46 36 5;
+  --ui-warning-fg:      253 224 71;
+  --ui-danger:          248 113 113;
+  --ui-danger-soft:     55 18 18;
+  --ui-danger-fg:       252 165 165;
+  --ui-info:            96 165 250;
+  --ui-info-soft:       17 30 54;
+  --ui-info-fg:         147 197 253;
+
+  /* Dark rail one step below the canvas, tinted active chip (not a
+     solid indigo slab) — matches the light rail's behavior. */
+  --ui-sidebar-bg:          16 17 19;
+  --ui-sidebar-fg:          226 228 232;
+  --ui-sidebar-muted:       148 152 162;
+  --ui-sidebar-heading:     100 104 114;
+  --ui-sidebar-line:        30 31 35;
+  --ui-sidebar-hover:       29 30 34;
+  --ui-sidebar-active-bg:   34 37 62;
+  --ui-sidebar-active-fg:   168 177 240;
+
+  /* Black shadows vanish on dark surfaces — deepen and add a rim light */
+  --ui-shadow-sm:    0 1px 2px 0 rgba(0,0,0,0.4);
+  --ui-shadow-md:    0 4px 8px -2px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+  --ui-shadow-lg:    0 12px 24px -6px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04);
+  --ui-shadow-modal: 0 32px 64px -12px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.07);
+
+  --ui-modal-bg:            29 30 34;
+  --ui-modal-border:        rgba(255,255,255,0.07);
+  --ui-modal-header-bg:     29 30 34;
+  --ui-modal-header-border: rgba(255,255,255,0.07);
+  --ui-modal-footer-bg:     rgba(22,23,26,0.7);
+
+  --ui-backdrop-color:      rgba(0,0,0,0.6);
+
+  --ui-input-bg:            rgb(var(--ui-surface-sunken));
+  --ui-input-border:        rgb(var(--ui-line));
+  --ui-input-border-focus:  rgb(var(--ui-accent));
+  --ui-input-ring:          rgb(var(--ui-accent) / 0.28);
+}
+
+/* Per-theme dark tuning: keep each theme recognisable in the dark too.
+   These follow html.dark in source order at equal (0,1,1) specificity. */
+html.dark[data-theme="modern"] {
+  --ui-canvas:         10 6 24;
+  --ui-surface:        24 16 48;
+  --ui-surface-raised: 36 25 66;
+  --ui-surface-sunken: 10 6 24;
+  --ui-surface-hover:  36 25 66;
+  --ui-line:           58 42 96;
+  --ui-line-strong:    82 60 132;
+  --ui-line-subtle:    36 25 66;
+  --ui-accent:         167 139 250;
+  --ui-accent-hover:   196 181 253;
+  --ui-accent-soft:    46 16 101;
+  --ui-accent-soft-fg: 216 180 254;
+}
+html.dark[data-theme="classic"] {
+  --ui-canvas:         10 17 32;
+  --ui-surface:        17 33 58;
+  --ui-surface-raised: 26 46 76;
+  --ui-surface-sunken: 10 17 32;
+  --ui-surface-hover:  26 46 76;
+  --ui-line:           45 68 102;
+  --ui-line-strong:    70 96 134;
+  --ui-line-subtle:    26 46 76;
+  --ui-accent:         96 165 250;
+  --ui-accent-hover:   147 197 253;
+  --ui-accent-soft:    23 45 84;
+  --ui-accent-soft-fg: 191 219 254;
+}
+html.dark[data-theme="friendly"] {
+  --ui-canvas:         26 18 12;
+  --ui-surface:        40 28 20;
+  --ui-surface-raised: 56 40 28;
+  --ui-surface-sunken: 26 18 12;
+  --ui-surface-hover:  56 40 28;
+  --ui-line:           78 57 40;
+  --ui-line-strong:    108 80 56;
+  --ui-line-subtle:    56 40 28;
+  --ui-fg:             253 245 236;
+  --ui-fg-muted:       194 172 152;
+  --ui-fg-subtle:      152 130 110;
+  --ui-accent:         251 146 60;
+  --ui-accent-hover:   253 186 116;
+  --ui-accent-soft:    67 36 12;
+  --ui-accent-soft-fg: 254 215 170;
+  --ui-modal-bg:       40 28 20;
+}
+html.dark[data-theme="sky"] {
+  --ui-accent-50:  20 40 84;
+  --ui-accent-100: 28 66 136;
+  --ui-accent-200: 26 82 172;
+  --ui-accent-300: 26 102 214;
+  --ui-canvas:         11 18 34;
+  --ui-surface:        18 28 50;
+  --ui-surface-raised: 26 38 66;
+  --ui-surface-sunken: 11 18 34;
+  --ui-surface-hover:  26 38 66;
+  --ui-line:           38 54 88;
+  --ui-line-strong:    60 80 120;
+  --ui-line-subtle:    26 38 66;
+  --ui-accent:         96 160 248;
+  --ui-accent-hover:   150 193 252;
+  --ui-accent-soft:    22 44 90;
+  --ui-accent-soft-fg: 194 219 254;
+  --ui-sidebar-bg:          14 22 42;
+  --ui-sidebar-line:        26 38 66;
+  --ui-sidebar-hover:       26 38 66;
+  --ui-sidebar-active-bg:   37 120 235;
+  --ui-sidebar-active-fg:   255 255 255;
+  --ui-modal-bg:       18 28 50;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SKY SHELL — the parts of the Sky look that tokens alone cannot carry:
+   the pale blue canvas wash, the solid gradient nav pill, the top bar
+   that floats on the canvas, and the pastel tile palette the dashboard
+   uses. Scoped to [data-theme="sky"] so the other themes are untouched;
+   (0,2,0) specificity beats the single-class utilities it adjusts.
+   ═══════════════════════════════════════════════════════════════════ */
+[data-theme="sky"]:not(.dark) .app-shell {
+  background-image:
+    radial-gradient(1200px 600px at 100% -10%, rgba(191,219,254,0.55), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, rgba(221,214,254,0.35), transparent 60%),
+    linear-gradient(180deg, #F3F8FF 0%, #EAF3FF 100%);
+}
+[data-theme="sky"] .app-sidebar {
+  border-right-color: transparent;
+  box-shadow: 4px 0 24px -12px rgba(37,99,235,0.18);
+}
+[data-theme="sky"] .app-topbar {
+  background: transparent;
+  backdrop-filter: none;
+  border-bottom-color: transparent;
+}
+[data-theme="sky"] .page-header {
+  background: rgb(var(--ui-canvas) / 0.82);
+  border-bottom-color: transparent;
+}
+[data-theme="sky"]:not(.dark) .page-header {
+  background: rgba(240,246,255,0.82);
+}
+[data-theme="sky"] .nav-item {
+  height: 38px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+[data-theme="sky"] .nav-item:not(.nav-item-active) svg {
+  color: rgb(var(--ui-accent) / 0.85);
+}
+[data-theme="sky"] .nav-item-active {
+  background-image: linear-gradient(135deg, #4C9BFF 0%, #2578EB 55%, #1D63D6 100%);
+  box-shadow: 0 8px 18px -8px rgba(37,120,235,0.65);
+}
+[data-theme="sky"] .nav-active-bar { display: none; }
+[data-theme="sky"] .search-pill input {
+  height: 40px;
+  border-radius: 9999px;
+  background: rgb(var(--ui-surface));
+  border-color: rgb(var(--ui-line));
+  box-shadow: var(--ui-shadow-sm);
+}
+
+/* Pastel tile palette — light tint, deeper icon chip. Shared by the
+   dashboard's overview cards and quick-access tiles. */
+.tile-blue   { --tile-bg: 232 242 255; --tile-chip: 59 130 246;  --tile-fg: 29 78 216; }
+.tile-green  { --tile-bg: 230 248 236; --tile-chip: 34 170 90;   --tile-fg: 21 128 61; }
+.tile-orange { --tile-bg: 255 240 226; --tile-chip: 245 140 40;  --tile-fg: 180 83 9; }
+.tile-purple { --tile-bg: 243 236 255; --tile-chip: 145 100 240; --tile-fg: 109 40 217; }
+.tile-teal   { --tile-bg: 228 247 247; --tile-chip: 20 170 170;  --tile-fg: 15 118 110; }
+.tile-pink   { --tile-bg: 255 236 244; --tile-chip: 236 90 150;  --tile-fg: 190 24 93; }
+.tile-red    { --tile-bg: 255 236 238; --tile-chip: 229 57 70;   --tile-fg: 188 30 46; }
+.tile-slate  { --tile-bg: 240 244 250; --tile-chip: 110 126 156; --tile-fg: 71 85 105; }
+html.dark [class*="tile-"] { --tile-bg: var(--ui-surface-raised); }
+.tile-surface { background: rgb(var(--tile-bg)); }
+.tile-chip    { background: rgb(var(--tile-chip)); color: #fff; }
+.tile-text    { color: rgb(var(--tile-fg)); }
+html.dark .tile-text { color: rgb(var(--tile-chip)); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   BASE LAYER
+   ═══════════════════════════════════════════════════════════════════ */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background: rgb(var(--ui-canvas));
+    color: rgb(var(--ui-fg));
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'tnum' 0;
+    font-size: 13.5px;
+    line-height: 1.5;
+    letter-spacing: -0.008em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  * { @apply box-border; }
+
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+
+  /* ── Scrollbars ── */
+  ::-webkit-scrollbar          { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track    { background: transparent; }
+  ::-webkit-scrollbar-thumb    { background: rgb(var(--ui-line-strong)); border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--ui-fg-subtle)); }
+
+  /* Token-based, so it works on both the light (Minimal) and dark rails. */
+  .sidebar-scroll::-webkit-scrollbar       { width: 3px; }
+  .sidebar-scroll::-webkit-scrollbar-thumb { background: rgb(var(--ui-sidebar-line)); border-radius: 99px; }
+  .sidebar-scroll::-webkit-scrollbar-thumb:hover { background: rgb(var(--ui-sidebar-muted) / 0.5); }
+
+  /* ── Focus rings ── */
+  :focus-visible {
+    outline: 2px solid var(--ui-input-border-focus, #6366f1);
+    outline-offset: 2px;
+    border-radius: var(--ui-radius-sm);
+  }
+
+  /* ── Native control focus ── */
+  input:focus,
+  select:focus,
+  textarea:focus {
+    outline: none;
+    border-color: var(--ui-input-border-focus) !important;
+    box-shadow: 0 0 0 3px var(--ui-input-ring), var(--ui-input-shadow, none);
+  }
+
+  /* ── Theme-aware inputs (.ui-input) ──
+     Colour AND density now come from tokens, so Classic really is
+     denser and Friendly really is airier — not just differently
+     rounded. Dark mode needs no separate rule. */
+  .ui-input {
+    width: 100%;
+    padding: var(--ui-ctl-py) var(--ui-ctl-px);
+    font-size: var(--ui-font-ctl);
+    font-family: var(--font-sans);
+    color: rgb(var(--ui-fg));
+    background: var(--ui-input-bg);
+    border: 1px solid var(--ui-input-border);
+    border-radius: var(--ui-input-radius);
+    box-shadow: var(--ui-input-shadow, none);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    line-height: 1.5;
+  }
+  .ui-input::placeholder { color: rgb(var(--ui-fg-subtle)); }
+  .ui-input:focus {
+    border-color: var(--ui-input-border-focus);
+    box-shadow: 0 0 0 3px var(--ui-input-ring);
+    outline: none;
+  }
+  .ui-input:disabled {
+    background: rgb(var(--ui-surface-sunken));
+    color: rgb(var(--ui-fg-subtle));
+    cursor: not-allowed;
+  }
+
+  select.ui-input { cursor: pointer; }
+
+  /* Native controls should follow the accent rather than Chrome blue */
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  progress {
+    accent-color: rgb(var(--ui-accent));
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   COMPONENTS LAYER
+   ═══════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* ── Surface primitives ──
+     .ui-surface is the single source of truth for "a raised panel".
+     Cards, popovers, dropdown menus and sheets all build on it, which
+     is what stops each one drifting into its own shade of white. */
+  .ui-surface {
+    background: rgb(var(--ui-surface));
+    border: 1px solid rgb(var(--ui-line));
+    border-radius: var(--ui-card-radius);
+  }
+
+  .card {
+    background: rgb(var(--ui-surface));
+    border: 1px solid rgb(var(--ui-line));
+    border-radius: var(--ui-card-radius);
+    box-shadow: var(--ui-shadow-sm);
+  }
+
+  /* Floating surfaces: dropdowns, popovers, menus */
+  .ui-popover {
+    background: rgb(var(--ui-surface-raised));
+    border: 1px solid rgb(var(--ui-line));
+    border-radius: var(--ui-card-radius);
+    box-shadow: var(--ui-shadow-lg);
+  }
+
+  .page-header {
+    padding: var(--ui-card-pad);
+    border-bottom: 1px solid rgb(var(--ui-line-subtle));
+    background: rgb(var(--ui-surface));
+  }
+
+  /* Legacy alias — forwards to .ui-input */
+  .input { @apply ui-input; }
+
+  /* ── Form labels ── */
+  .form-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgb(var(--ui-fg-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 7px;
+    line-height: 1;
+    font-family: var(--font-sans);
+  }
+  .form-label .req { color: rgb(var(--ui-danger)); margin-left: 2px; }
+
+  .form-field { display: flex; flex-direction: column; }
+
+  .form-section {
+    background: rgb(var(--ui-surface-sunken));
+    border: 1px solid rgb(var(--ui-line-subtle));
+    border-radius: var(--ui-card-radius);
+    padding: 16px 18px 18px;
+  }
+  .form-section + .form-section { margin-top: 10px; }
+
+  .form-section-title {
+    font-size: 10.5px;
+    font-weight: 800;
+    color: rgb(var(--ui-fg-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    margin-bottom: 14px;
+    line-height: 1;
+    font-family: var(--font-sans);
+  }
+
+  .form-hint {
+    font-size: 11.5px;
+    color: rgb(var(--ui-fg-subtle));
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+  .form-hint.error { color: rgb(var(--ui-danger)); }
+
+  /* ── Keyboard hint chip (⌘K etc.) — one spelling everywhere ── */
+  .ui-kbd {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: rgb(var(--ui-fg-subtle));
+    background: rgb(var(--ui-surface-sunken));
+    border: 1px solid rgb(var(--ui-line));
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    line-height: 1.4;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: var(--ui-badge-radius);
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+  }
+
+  /* ── Data table ──
+     Five hand-rolled header styles previously coexisted; this is the
+     one they all collapse into. Density follows --ui-row-py, so
+     Classic gets a genuinely compact grid. */
+  .ui-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+  .ui-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    text-align: left;
+    padding: 9px 16px;
+    font-size: 10.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgb(var(--ui-fg-subtle));
+    background: rgb(var(--ui-surface));
+    border-bottom: 1px solid rgb(var(--ui-line));
+    white-space: nowrap;
+  }
+  .ui-table tbody td {
+    padding: var(--ui-row-py) 16px;
+    color: rgb(var(--ui-fg));
+    border-bottom: 1px solid rgb(var(--ui-line-subtle));
+    vertical-align: middle;
+  }
+  .ui-table tbody tr:last-child td { border-bottom: 0; }
+  .ui-table tbody tr { transition: background-color 0.12s ease; }
+  .ui-table tbody tr:hover { background: rgb(var(--ui-surface-hover)); }
+  .ui-table--clickable tbody tr { cursor: pointer; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   UTILITIES
+   ═══════════════════════════════════════════════════════════════════ */
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+  /* Opt a subtree out of the sidebar's inverted palette */
+  .ui-shell-pad { padding: var(--ui-card-pad); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ANIMATIONS
+   Kept here as the single definition; tailwind.config.js no longer
+   redeclares these keyframes, so timings cannot drift apart.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scale-in {
+  from { transform: scale(0.96) translateY(4px); opacity: 0; }
+  to   { transform: scale(1)    translateY(0);   opacity: 1; }
+}
+@keyframes slide-up {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+@keyframes slide-in {
+  from { transform: translateX(120%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes slide-down {
+  from { transform: translateY(-6px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes theme-pop {
+  0%   { transform: scale(0.94); opacity: 0; }
+  60%  { transform: scale(1.02); }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
+.animate-fade-in       { animation: fade-in       0.15s ease-out; }
+.animate-scale-in      { animation: scale-in      0.2s  cubic-bezier(0.16,1,0.3,1); }
+.animate-slide-up      { animation: slide-up      0.22s cubic-bezier(0.16,1,0.3,1); }
+.animate-slide-in-left { animation: slide-in-left 0.22s ease-out; }
+.animate-slide-in      { animation: slide-in      0.25s ease-out; }
+.animate-slide-down    { animation: slide-down    0.18s ease-out; }
+.animate-theme-pop     { animation: theme-pop     0.3s  cubic-bezier(0.16,1,0.3,1); }
+.animate-pulse-fast    { animation: pulse 0.8s cubic-bezier(0.4,0,0.6,1) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SKELETON
+   ═══════════════════════════════════════════════════════════════════ */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--ui-surface-sunken)) 25%,
+    rgb(var(--ui-surface-hover))  50%,
+    rgb(var(--ui-surface-sunken)) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--ui-radius-sm);
+}
+html.dark .skeleton {
+  background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+  background-size: 200% 100%;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SCROLL CONTAINERS
+   ═══════════════════════════════════════════════════════════════════ */
+
+.table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--ui-line-strong)) transparent;
+}
+.table-container::-webkit-scrollbar       { height: 4px; }
+.table-container::-webkit-scrollbar-track { background: transparent; }
+.table-container::-webkit-scrollbar-thumb { background: rgb(var(--ui-line-strong)); border-radius: 2px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   CARD EFFECTS
+   ═══════════════════════════════════════════════════════════════════ */
+
+.card-hover { transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease; }
+.card-hover:hover {
+  box-shadow: var(--ui-shadow-lg);
+  border-color: rgb(var(--ui-line-strong));
+  transform: translateY(-1px);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   GLASS
+   ═══════════════════════════════════════════════════════════════════ */
+
+.glass {
+  background: rgb(var(--ui-surface) / 0.72);
+  border: 1px solid rgb(var(--ui-line) / 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MODAL ACCENT BAR
+   ═══════════════════════════════════════════════════════════════════ */
+
+.modal-accent-bar {
+  height: var(--ui-modal-accent-h, 0px);
+  background: var(--ui-modal-accent-bg, transparent);
+  flex-shrink: 0;
+  border-radius: var(--ui-modal-radius) var(--ui-modal-radius) 0 0;
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   RESPONSIVE TABLE
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Removed: a .responsive-table rule that hid every column from the fourth
+   onward below 768px. It had zero usages, but as a named utility it was an
+   invitation to hide a table's action column on mobile with no way to reach
+   it. Use DataTable's per-column  instead — it is explicit about
+   which column disappears, and never the last one. */
+
+/* ═══════════════════════════════════════════════════════════════════
+   THEME PICKER PANEL
+   ═══════════════════════════════════════════════════════════════════ */
+
+.theme-swatch { transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.theme-swatch:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -4px rgba(0,0,0,0.15);
+}
+.theme-swatch.active {
+  box-shadow: 0 0 0 2px rgb(var(--ui-accent)), 0 6px 16px -4px rgb(var(--ui-accent) / 0.3);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PRINT
+   Invoices, quotes and payslips are printed from the browser; force
+   the light palette so a user in dark mode doesn't burn a toner
+   cartridge on a navy background.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@media print {
+  html, html.dark {
+    --ui-canvas:         255 255 255;
+    --ui-surface:        255 255 255;
+    --ui-surface-raised: 255 255 255;
+    --ui-surface-sunken: 248 250 252;
+    --ui-line:           203 213 225;
+    --ui-line-subtle:    226 232 240;
+    --ui-fg:             17 24 39;
+    --ui-fg-muted:       75 85 99;
+    --ui-fg-subtle:      128 140 156;
+    --ui-shadow-sm: none;
+    --ui-shadow-md: none;
+    --ui-shadow-lg: none;
+  }
+  .no-print { display: none !important; }
+}
+
+/* ─── Rich text (editor content + rendered output) ─────────────────────────
+   One ruleset styles both the TipTap editing surface and the read-only
+   RichText renderer, so what you type is exactly what readers see. Token-
+   driven throughout — inherits every theme and dark mode for free. */
+.rich-text {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: rgb(var(--ui-fg));
+  word-break: break-word;
+}
+.rich-text p { margin: 0 0 0.5em; }
+.rich-text p:last-child { margin-bottom: 0; }
+.rich-text strong { font-weight: 600; }
+.rich-text h1, .rich-text h2 { font-size: 1.15em; font-weight: 600; margin: 0.9em 0 0.35em; }
+.rich-text h3, .rich-text h4 { font-size: 1.05em; font-weight: 600; margin: 0.8em 0 0.3em; }
+.rich-text h1:first-child, .rich-text h2:first-child, .rich-text h3:first-child { margin-top: 0; }
+.rich-text ul, .rich-text ol { margin: 0.35em 0 0.6em; padding-left: 1.4em; }
+.rich-text ul { list-style: disc; }
+.rich-text ol { list-style: decimal; }
+.rich-text li { margin: 0.15em 0; }
+.rich-text li > p { margin: 0; }
+.rich-text blockquote {
+  margin: 0.5em 0; padding: 0.25em 0.9em;
+  border-left: 3px solid rgb(var(--ui-accent) / 0.4);
+  color: rgb(var(--ui-fg-muted));
+}
+.rich-text code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86em;
+  background: rgb(var(--ui-surface-sunken));
+  border: 1px solid rgb(var(--ui-line-subtle));
+  border-radius: 4px;
+  padding: 0.08em 0.35em;
+}
+.rich-text pre {
+  background: rgb(var(--ui-surface-sunken));
+  border: 1px solid rgb(var(--ui-line-subtle));
+  border-radius: var(--ui-card-radius);
+  padding: 0.7em 0.9em; margin: 0.5em 0;
+  overflow-x: auto;
+}
+.rich-text pre code { background: none; border: none; padding: 0; font-size: 12.5px; }
+.rich-text a { color: rgb(var(--ui-accent)); text-decoration: underline; text-underline-offset: 2px; }
+.rich-text img {
+  max-width: 100%; height: auto;
+  border-radius: var(--ui-card-radius);
+  border: 1px solid rgb(var(--ui-line-subtle));
+  margin: 0.4em 0;
+  display: block;
+}
+.rich-text hr { border: none; border-top: 1px solid rgb(var(--ui-line)); margin: 0.9em 0; }
+.rich-text table { border-collapse: collapse; margin: 0.5em 0; width: 100%; font-size: 0.95em; }
+.rich-text th, .rich-text td { border: 1px solid rgb(var(--ui-line)); padding: 0.35em 0.6em; text-align: left; }
+.rich-text th { background: rgb(var(--ui-surface-sunken)); font-weight: 600; }
+
+/* TipTap placeholder */
+.rich-text p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left; height: 0; pointer-events: none;
+  color: rgb(var(--ui-fg-subtle));
+}
+/* Selected image outline while editing */
+.rich-text img.ProseMirror-selectednode { outline: 2px solid rgb(var(--ui-accent)); }
+
+/* Sky tables — a light blue header band with sentence-case, darker column
+   names and roomier rows, as in the attendance reference. */
+[data-theme="sky"] .ui-table thead th {
+  padding: 12px 18px;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: rgb(var(--ui-fg));
+  background: rgb(var(--ui-accent-50));
+  border-bottom-color: rgb(var(--ui-line));
+}
+[data-theme="sky"] .ui-table tbody td { padding-left: 18px; padding-right: 18px; }
+
+/* Sky page titles — larger and heavier, as in the reference screens */
+[data-theme="sky"] .page-header h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+
+/* Sky forms — the reference "Add …" screens: bold sentence-case labels in
+   the body colour, no tinted section boxes (sections are separated by a
+   hairline instead), and section titles that read as small headings. */
+[data-theme="sky"] .form-label {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: rgb(var(--ui-fg));
+  margin-bottom: 8px;
+  line-height: 1.2;
+}
+[data-theme="sky"] .form-section {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+[data-theme="sky"] .form-section + .form-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgb(var(--ui-line-subtle));
+}
+[data-theme="sky"] .form-section-title {
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  color: rgb(var(--ui-fg));
+}
+
+/* Sky pill tabs — the selected filter is a solid blue pill, the rest are
+   white chips with a soft shadow (People reference). */
+[data-theme="sky"] .ui-tab-pill {
+  height: 38px;
+  padding-left: 16px;
+  padding-right: 16px;
+  font-size: 13.5px;
+  border-radius: 12px;
+  box-shadow: var(--ui-shadow-sm);
+}
+[data-theme="sky"] .ui-tab-pill.is-active {
+  background: rgb(var(--ui-accent));
+  border-color: rgb(var(--ui-accent));
+  color: rgb(var(--ui-accent-fg));
+  box-shadow: 0 6px 14px -6px rgb(var(--ui-accent) / 0.6);
+}
+[data-theme="sky"] .page-header-icon { width: 44px; height: 44px; }
+
+/* Sky card headers — the section icon sits in a pale blue circle and the
+   title reads as a proper heading (HR Settings, record panels, …). */
+[data-theme="sky"] .card-header-icon {
+  width: 38px;
+  height: 38px;
+  margin-top: 0;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(var(--ui-accent-soft));
+  color: rgb(var(--ui-accent));
+}
+[data-theme="sky"] .card-header-icon svg { width: 18px; height: 18px; }
+[data-theme="sky"] .card-header-title { font-size: 15.5px; font-weight: 800; letter-spacing: -0.01em; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   ASSISTANT ROBOT — launcher glow and greeting, chat panel chrome, and
+   the CSS fallback robot (RobotFace) used while three.js loads or when
+   WebGL is unavailable. All motion is dropped under reduced-motion.
+   ═══════════════════════════════════════════════════════════════════ */
+.robot-launcher { background: transparent; transition: transform 160ms ease; }
+.robot-launcher:hover { transform: translateY(-3px); }
+.robot-launcher:active { transform: scale(0.96); }
+.robot-halo {
+  position: absolute; inset: 18% 8% 4%;
+  border-radius: 9999px;
+  background: radial-gradient(closest-side, rgb(var(--ui-accent) / 0.38), rgb(var(--ui-accent) / 0.12) 60%, transparent 100%);
+  filter: blur(6px);
+  animation: robot-halo 3.2s ease-in-out infinite;
+}
+@keyframes robot-halo { 0%, 100% { opacity: 0.65; transform: scale(0.95); } 50% { opacity: 1; transform: scale(1.06); } }
+
+.robot-bubble {
+  position: absolute; right: 88%; top: 10%;
+  white-space: nowrap; pointer-events: none;
+  padding: 7px 12px; border-radius: 14px 14px 4px 14px;
+  font-size: 12.5px; font-weight: 600;
+  color: rgb(var(--ui-fg)); background: rgb(var(--ui-surface));
+  border: 1px solid rgb(var(--ui-line));
+  box-shadow: var(--ui-shadow-md);
+  opacity: 0; transform: translateX(6px) scale(0.96);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.robot-launcher:hover .robot-bubble,
+.robot-launcher:focus-visible .robot-bubble { opacity: 1; transform: none; }
+
+.robot-panel { transform-origin: bottom right; animation: robot-panel-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.15); }
+@keyframes robot-panel-in { from { opacity: 0; transform: translateY(14px) scale(0.92); } to { opacity: 1; transform: none; } }
+.robot-panel__header {
+  background:
+    radial-gradient(260px 160px at 18% 60%, rgb(var(--ui-accent) / 0.18), transparent 70%),
+    linear-gradient(180deg, rgb(var(--ui-accent-50)), rgb(var(--ui-surface)));
+  border-bottom: 1px solid rgb(var(--ui-line-subtle));
+}
+.robot-msg-in { animation: robot-msg-in 220ms ease-out both; }
+@keyframes robot-msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.robot-user-bubble {
+  background-image: linear-gradient(135deg, #4C9BFF 0%, rgb(var(--ui-accent)) 60%, rgb(var(--ui-accent-hover)) 100%);
+  box-shadow: 0 6px 14px -8px rgb(var(--ui-accent) / 0.7);
+}
+
+.robot-status-dot { width: 8px; height: 8px; border-radius: 9999px; background: rgb(var(--ui-success)); box-shadow: 0 0 0 3px rgb(var(--ui-success) / 0.18); }
+.robot-status-dot--thinking,
+.robot-status-dot--listening { background: rgb(var(--ui-accent)); box-shadow: 0 0 0 3px rgb(var(--ui-accent) / 0.2); animation: robot-dot 1s ease-in-out infinite; }
+.robot-status-dot--error { background: rgb(var(--ui-danger)); box-shadow: 0 0 0 3px rgb(var(--ui-danger) / 0.18); }
+@keyframes robot-dot { 50% { transform: scale(1.35); } }
+
+.robot-typing { display: inline-flex; gap: 4px; align-items: center; height: 10px; }
+.robot-typing span { width: 6px; height: 6px; border-radius: 9999px; background: rgb(var(--ui-accent)); animation: robot-typing 1.1s ease-in-out infinite; }
+.robot-typing span:nth-child(2) { animation-delay: 0.15s; }
+.robot-typing span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes robot-typing { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+/* RobotFace — CSS robot */
+.robot-face { position: relative; display: flex; align-items: center; justify-content: center; }
+.robot-face__head {
+  position: relative; width: 62%; aspect-ratio: 1.12;
+  border-radius: 46% 46% 44% 44%;
+  background: radial-gradient(circle at 35% 28%, #ffffff, #EEF2F8 70%, #DCE3EE);
+  box-shadow: 0 6px 16px -6px rgba(30,64,175,0.35), inset 0 -4px 8px rgba(30,64,175,0.08);
+  display: flex; align-items: center; justify-content: center;
+  animation: robot-face-float 3s ease-in-out infinite;
+}
+.robot-face__cap {
+  position: absolute; top: 21%; left: 50%;
+  width: 26%; height: 7%; border-radius: 9999px; transform: translateX(-50%);
+  background: rgb(var(--ui-accent)); z-index: 1;
+  animation: robot-face-float 3s ease-in-out infinite;
+}
+.robot-face__visor {
+  width: 78%; height: 62%; border-radius: 42%;
+  background: radial-gradient(circle at 40% 30%, #1B2438, #0A1020 70%);
+  display: flex; align-items: center; justify-content: center; gap: 16%;
+}
+.robot-face__eye {
+  width: 18%; height: 32%; border-radius: 9999px;
+  background: #62D8FF; box-shadow: 0 0 8px #62D8FF, 0 0 2px #fff;
+  animation: robot-face-blink 4.2s infinite;
+}
+.robot-face--thinking .robot-face__eye { animation: robot-face-blink 4.2s infinite, robot-face-glow 1.2s ease-in-out infinite; }
+.robot-face--error .robot-face__eye { background: #FF6B7A; box-shadow: 0 0 8px #FF6B7A; }
+.robot-face--happy .robot-face__eye { height: 16%; border-radius: 9999px 9999px 2px 2px; }
+@keyframes robot-face-blink { 0%, 46%, 50%, 100% { transform: scaleY(1); } 48% { transform: scaleY(0.1); } }
+@keyframes robot-face-glow { 50% { filter: brightness(1.5); } }
+@keyframes robot-face-float { 50% { translate: 0 -3%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .robot-halo, .robot-panel, .robot-msg-in, .robot-typing span, .robot-status-dot,
+  .robot-face__head, .robot-face__cap, .robot-face__eye { animation: none !important; }
+  .robot-launcher, .robot-bubble { transition: none; }
+}

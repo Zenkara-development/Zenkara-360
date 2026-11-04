@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 9+ blocks cleartext HTTP by default. The API is reached over HTTPS
+  (https://<your domain>/api), so the only cleartext origin allowed is the
+  WebView's own http://localhost (androidScheme: 'http' in capacitor.config.ts).
+  Never add a server IP here — serve the API over HTTPS instead.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- The WebView serves the app itself from http://localhost
+             (androidScheme: 'http' in capacitor.config.ts). -->
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>

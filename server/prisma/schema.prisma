@@ -1,0 +1,3773 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id             String             @id @default(cuid())
+  name           String
+  slug           String             @unique
+  // ISO 4217 currency code (e.g. "USD", "EUR", "INR") — the single currency
+  // every $ amount across the app formats in for this org (deals, quotes,
+  // invoices, payroll). Chosen over per-record currency to avoid needing an
+  // exchange-rate story for anything that sums across records (pipeline
+  // forecast, payroll totals, reports) — see utils/format.ts (client) for
+  // where this actually gets applied via Intl.NumberFormat.
+  currency       String             @default("USD") @map("currency")
+  // IANA time zone name (e.g. "America/New_York", "Asia/Kolkata") — every
+  // date/time this org sees is formatted in this zone rather than the
+  // viewer's browser zone, so e.g. a ticket's "created 2 hours ago" reads
+  // the same for every teammate regardless of where they're physically
+  // logging in from. Stored dates themselves stay UTC in Postgres either
+  // way; this only affects display formatting (Intl.DateTimeFormat's
+  // `timeZone` option), never what's persisted.
+  timezone       String             @default("UTC") @map("timezone")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  aiCustomRules     AICustomRule[]
+  businessContext   BusinessContext?
+  customAIFunctions CustomAIFunction[]
+  customScripts     CustomScript[]
+  accounts          Account[]
+  activities     Activity[]
+  apiKeys        ApiKey[]
+  assets         Asset[]
+  campaigns      Campaign[]
+  categories     Category[]
+  changeRequests ChangeRequest[]
+  contacts       Contact[]
+  conversations  Conversation[]
+  csatResponses  CsatResponse[]
+  customFields   CustomField[]
+  customModules  CustomModule[]
+  customModuleRecords CustomModuleRecord[]
+  deals          Deal[]
+  recordTemplates RecordTemplate[]
+  replyTemplates  ReplyTemplate[]
+  emailTemplates  EmailTemplate[]
+  quoteTemplates  QuoteTemplate[]
+  emailAccount   EmailAccount?
+  inviteTokens   InviteToken[]
+  articles       KnowledgeArticle[]
+  leads          Lead[]
+  notifications  Notification[]
+  branding       OrgBranding?
+  pipelines      Pipeline[]
+  portalUsers    PortalUser[]
+  pushSubscriptions PushSubscription[]
+  quotes         Quote[]
+  schedules      Schedule[]
+  slaPolicies    SlaPolicy[]
+  slackConfig    SlackConfig?
+  subscription   Subscription?
+  tags           Tag[]
+  recordTags     RecordTag[]
+  teamsConfig    TeamsConfig?
+  tickets        Ticket[]
+  timeEntries    TimeEntry[]
+  users          User[]
+  usageEvents    UsageEvent[]
+  whatsAppConfig WhatsAppConfig?
+  workflowRules  WorkflowRule[]
+  storageConfig  StorageConfig?
+  officeLocations   OfficeLocation[]
+  attendanceRecords AttendanceRecord[]
+  leaveTypes        LeaveType[]
+  leaveRequests     LeaveRequest[]
+  invoices          Invoice[]
+  salaryStructures  SalaryStructure[]
+  payrollRuns       PayrollRun[]
+  payslips          Payslip[]
+  payslipTemplates  PayslipTemplate[]
+  directoryConfig   DirectoryConfig?
+  directoryRoleMappings DirectoryRoleMapping[]
+  directorySyncLogs     DirectorySyncLog[]
+
+  departments       Department[]
+  locations         Location[]
+  employees         Employee[]
+  employeeDocuments EmployeeDocument[]
+  skills            Skill[]
+  internalTeams     Team[]
+  tasks             Task[]
+  approvalPolicies  ApprovalPolicy[]
+  approvalRequests  ApprovalRequest[]
+  approvalDelegations ApprovalDelegation[]
+  roles             Role[]
+  knowledgeSources  KnowledgeSource[]
+  knowledgeDocuments KnowledgeDocument[]
+  knowledgeChunks   KnowledgeChunk[]
+  aiProviders       AiProvider[]
+  aiInteractionLogs AiInteractionLog[]
+  aiBudgets         AiBudget[]
+
+  @@map("organizations")
+  chatThreads       ChatThread[]
+  workspaceConfig   WorkspaceConfig?
+  solutionTemplates SolutionTemplate[]
+  webForms          WebForm[]
+  attendancePolicy  AttendancePolicy?
+  faceEnrollments   FaceEnrollment[]
+  locationPings     AttendanceLocationPing[]
+  salaryComponents  SalaryComponent[]
+  payrollCycles     PayrollCycle[]
+  employeeSalaries  EmployeeSalary[]
+  leaveBalanceAdjustments LeaveBalanceAdjustment[]
+  attendancePolicyGroups  AttendancePolicyGroup[]
+  holidays                Holiday[]
+  attendanceDays          AttendanceDay[]
+  attendanceAudits        AttendanceAudit[]
+}
+
+// Lightweight per-event usage log — currently AI_CALL, WHATSAPP_SEND, and
+// EMAIL_SEND. No billing enforcement reads this yet (see
+// utils/usageTracking.ts); it exists purely so real usage patterns are
+// visible before we set any included-quota/overage numbers, rather than
+// guessing at limits with no data. One row per event rather than a rolling
+// counter, so it can be sliced by day/type once there's enough history to
+// actually decide.
+//
+// `source` distinguishes, for WHATSAPP_SEND/EMAIL_SEND, whether the org's
+// own connected account was used ('OWN') or the platform's shared
+// fallback was ('PLATFORM') — see utils/whatsapp.ts and utils/mailer.ts.
+// Null for event types where the distinction doesn't apply (AI_CALL) or
+// for rows recorded before this column existed.
+model UsageEvent {
+  id        String       @id @default(cuid())
+  orgId     String       @map("org_id")
+  type      String
+  source    String?
+  createdAt DateTime     @default(now()) @map("created_at")
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, type, createdAt])
+  @@map("usage_events")
+}
+
+// Singleton row (always id = 'platform') holding the platform-wide email/
+// WhatsApp *fallback* sending config — the account used when an org hasn't
+// connected its own (see utils/whatsapp.ts, utils/mailer.ts). Lets a
+// PLATFORM_ADMIN change these live from the console instead of editing
+// Render env vars and redeploying. Every field is optional and layers over
+// the matching env var — see utils/platformSettings.ts's getPlatformMailConfig/
+// getPlatformWhatsAppConfig: a blank field here just means "use the env var".
+// Secrets (resendApiKey, smtpPass, twilioAuthToken) are stored encrypted via
+// utils/crypto.ts's encryptSecret, same as EmailAccount.password.
+model PlatformSettings {
+  id               String   @id @default("platform")
+  resendApiKey     String?  @map("resend_api_key")
+  resendFrom       String?  @map("resend_from")
+  smtpHost         String?  @map("smtp_host")
+  smtpPort         Int?     @map("smtp_port")
+  smtpUser         String?  @map("smtp_user")
+  smtpPass         String?  @map("smtp_pass")
+  smtpFrom         String?  @map("smtp_from")
+  twilioAccountSid String?  @map("twilio_account_sid")
+  twilioAuthToken  String?  @map("twilio_auth_token")
+  twilioFromNumber String?  @map("twilio_from_number")
+  // The shared bucket behind provider 'HOSTED_S3' — the storage every org on
+  // a paid plan gets without connecting anything of their own. Previously
+  // S3_* env vars only, which meant changing bucket needed a redeploy.
+  // Same layering as the fields above: set here = used, left null = fall
+  // back to the env var. Secrets encrypted with ENCRYPTION_KEY.
+  s3Bucket         String?  @map("s3_bucket")
+  s3Region         String?  @map("s3_region")
+  s3Endpoint       String?  @map("s3_endpoint")
+  s3AccessKeyId    String?  @map("s3_access_key_id")
+  s3SecretAccessKey String? @map("s3_secret_access_key")
+  /// Licence pricing set by the platform operator (utils/pricing.ts
+  /// PricingConfig): base seat price, module add-ons, plan list prices,
+  /// volume tiers, yearly discount, grace period. Null = code/env defaults.
+  pricing          Json?
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
+}
+
+// A "create new org" signup submitted via the public register form. Nothing
+// in Organization/User is written until an admin approves it (see
+// auth.controller.ts register()/approveOrgSignup()) — this table is the only
+// trace of the request until then, holding everything needed to create the
+// org + first SUPER_ADMIN user later without asking the requester to log in
+// again or re-enter their password.
+model OrgSignupRequest {
+  id               String    @id @default(cuid())
+  organizationName String    @map("organization_name")
+  name             String
+  email            String
+  passwordHash     String    @map("password_hash")
+  token            String    @unique
+  status           String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt        DateTime  @default(now()) @map("created_at")
+  decidedAt        DateTime? @map("decided_at")
+
+  @@map("org_signup_requests")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model InviteToken {
+  id        String       @id @default(cuid())
+  orgId     String       @map("org_id")
+  email     String
+  role      UserRole     @default(EMPLOYEE)
+  /// The Role row this invite was issued for, when the admin picked a custom
+  /// role. Deliberately a bare id with no foreign key: an invite is a
+  /// short-lived token, and a role deleted before it is accepted should make
+  /// the invite fall back to `role` above rather than fail to resolve.
+  roleId    String?      @map("role_id")
+  token     String       @unique
+  expiresAt DateTime     @map("expires_at")
+  usedAt    DateTime?    @map("used_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("invite_tokens")
+}
+
+model User {
+  id                     String             @id @default(cuid())
+  name                   String
+  email                  String             @unique
+  passwordHash           String             @map("password_hash")
+  role                   UserRole           @default(EMPLOYEE)
+  department             String?
+  phone                  String? // E.164 format (e.g. +14155551234) — used to resolve the "ASSIGNEE" recipient for scheduled/workflow WhatsApp notifications
+  avatarUrl              String?            @map("avatar_url")
+  isActive               Boolean            @default(true) @map("is_active")
+  // Google SSO linking. A user links their Google account from their Profile
+  // page (must already have a staff account — SSO does not create new orgs
+  // or bypass the invite/approval-gated signup flow); once set, login also
+  // accepts a verified Google ID token in place of a password. Unique so no
+  // two staff users can link the same Google account.
+  googleId               String?            @unique @map("google_id")
+  // Microsoft Entra ID SSO linking — same shape as googleId above, set the
+  // first time a user signs in via their org's configured Entra tenant
+  // (matched first by this id, falling back to a one-time email match on
+  // first SSO login — see auth.controller.ts entraCallback()). Unique so an
+  // Entra identity can't end up linked to two different CRMITdesk users.
+  entraObjectId          String?            @unique @map("entra_object_id")
+  // How this account came to exist — MANUAL | INVITE | DIRECTORY (the last
+  // meaning JIT- or sync-created from Entra ID; see auth.controller.ts
+  // entraCallback() and modules/directory/directorySync.ts). Null for
+  // accounts created before this column existed. Purely informational — the
+  // admin Users list uses it to warn before hand-editing a directory-managed
+  // account that a sync could just overwrite.
+  provisionedVia         String?            @map("provisioned_via")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+  orgId                  String?            @map("org_id")
+  passwordResetTokens    PasswordResetToken[]
+  calendarConnection     CalendarConnection?
+  ownedAccounts          Account[]          @relation("AccountOwner")
+  activities             Activity[]
+  apiKeys                ApiKey[]
+  assignedAssets         Asset[]
+  attachments            Attachment[]
+  auditLogs              AuditLog[]
+  changeRequestsAssigned ChangeRequest[]    @relation("ChangeAssignee")
+  changeRequestsMade     ChangeRequest[]    @relation("ChangeRequester")
+  comments               Comment[]
+  recordTags             RecordTag[]        @relation("RecordTagAuthor")
+  ownedContacts          Contact[]          @relation("ContactOwner")
+  assignedConversations  Conversation[]
+  assignedDeals          Deal[]             @relation("DealAssignee")
+  knowledgeArticles      KnowledgeArticle[]
+  assignedLeads          Lead[]             @relation("LeadAssignee")
+  notifications          Notification[]
+  pushSubscriptions      PushSubscription[]
+  quotesCreated          Quote[]            @relation("QuoteCreator")
+  refreshTokens          RefreshToken[]
+  schedulesCreated       Schedule[]
+  slaPoliciesToNotify    SlaPolicy[]        @relation("SlaPolicyNotifyUser")
+  assignedTickets        Ticket[]           @relation("TicketAssignee")
+  requestedTickets       Ticket[]           @relation("TicketRequester")
+  timeEntries            TimeEntry[]
+  totpSecret             TOTPSecret?
+  org                    Organization?      @relation(fields: [orgId], references: [id])
+  storageConfigsConnected StorageConfig[]
+  attendanceRecords      AttendanceRecord[]
+  leaveRequests          LeaveRequest[]     @relation("LeaveRequester")
+  leaveRequestsDecided   LeaveRequest[]     @relation("LeaveDecider")
+  invoicesCreated        Invoice[]          @relation("InvoiceCreator")
+  salaryStructures       SalaryStructure[]
+  payslips               Payslip[]
+  payrollRunsCreated     PayrollRun[]       @relation("PayrollRunCreator")
+
+  roleId                 String?            @map("role_id")
+  roleRef                Role?              @relation("UserRoleRef", fields: [roleId], references: [id], onDelete: SetNull)
+  employee               Employee?          @relation("EmployeeUser")
+  assignedTasks          Task[]             @relation("TaskAssignee")
+  createdTasks           Task[]             @relation("TaskCreator")
+  approvalRequestsMade   ApprovalRequest[]  @relation("ApprovalRequester")
+  approvalActions        ApprovalAction[]   @relation("ApprovalApprover")
+  delegationsGiven       ApprovalDelegation[] @relation("DelegationFrom")
+  delegationsReceived    ApprovalDelegation[] @relation("DelegationTo")
+  aiInteractionLogs      AiInteractionLog[] @relation("AiLogUser")
+
+  @@map("users")
+  chatParticipants ChatParticipant[]
+  chatMessages     ChatMessage[]
+  faceEnrollment    FaceEnrollment?
+  locationPings     AttendanceLocationPing[]
+  employeeSalaries  EmployeeSalary[]
+  leaveBalanceAdjustments LeaveBalanceAdjustment[]
+  attendanceDays          AttendanceDay[]
+  attendanceAuditsAbout   AttendanceAudit[] @relation("AttendanceAuditSubject")
+  attendanceAuditsMade    AttendanceAudit[] @relation("AttendanceAuditChanger")
+}
+
+// Staff forgot-password flow. tokenHash is SHA-256 of the raw token emailed
+// to the user (same pattern as PortalToken/RefreshToken — the raw token is
+// never persisted). 30-minute expiry, single use (usedAt set on consumption).
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// Per-user (not per-org) Google Calendar connection — each staff member
+// links their own calendar, mirroring how Google Calendar accounts work
+// personally rather than as an org-wide resource. Powers a one-way push of
+// Activities (due date) and assigned Tickets (SLA due date) as calendar
+// events; see utils/googleCalendar.ts.
+model CalendarConnection {
+  id             String    @id @default(cuid())
+  userId         String    @unique @map("user_id")
+  provider       String    @default("GOOGLE_CALENDAR") @map("provider")
+  accessToken    String    @map("access_token")
+  refreshToken   String?   @map("refresh_token")
+  tokenExpiresAt DateTime? @map("token_expires_at")
+  calendarId     String    @default("primary") @map("calendar_id")
+  connectedEmail String?   @map("connected_email")
+  syncActivities Boolean   @default(true) @map("sync_activities")
+  syncTickets    Boolean   @default(true) @map("sync_tickets")
+  lastSyncAt     DateTime? @map("last_sync_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("calendar_connections")
+}
+
+model Comment {
+  id         String     @id @default(cuid())
+  authorId   String     @map("author_id")
+  entityType EntityType @map("entity_type")
+  entityId   String     @map("entity_id")
+  body       String
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  author     User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@map("comments")
+}
+
+// Files never touch our own storage — fileUrl/providerFileId point at wherever
+// the org's connected drive (see StorageConfig below) actually holds the
+// bytes. provider is snapshotted per-row (not just read off StorageConfig)
+// so an attachment uploaded before an org switches providers still knows
+// which API to call for its own download/delete.
+model Attachment {
+  id             String     @id @default(cuid())
+  uploaderId     String     @map("uploader_id")
+  entityType     EntityType @map("entity_type")
+  entityId       String     @map("entity_id")
+  fileName       String     @map("file_name")
+  fileUrl        String     @map("file_url")
+  provider       String     @default("GOOGLE_DRIVE") @map("provider")
+  providerFileId String     @map("provider_file_id")
+  fileSize       Int        @map("file_size")
+  mimeType       String     @map("mime_type")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  uploader       User       @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@map("attachments")
+}
+
+// Org-level "bring your own drive" connection. Only one provider connected
+// per org at a time (unique orgId) — reconnecting with a different provider
+// overwrites this row. Existing HOSTED_S3 Attachment rows keep working
+// regardless, since each one recorded its own provider/providerFileId at
+// upload time and S3 access needs no per-org config. GOOGLE_DRIVE
+// attachments are NOT that resilient — they need this row's live
+// accessToken/refreshToken, so switching away from Drive (to hosted
+// storage, disconnecting, or reconnecting a different Drive account) would
+// strand them; storage.controller.ts blocks those transitions while any
+// exist (assertWontOrphanDriveAttachments).
+model StorageConfig {
+  id                String       @id @default(cuid())
+  orgId             String       @unique @map("org_id")
+  // One of:
+  //   'GOOGLE_DRIVE' — bring-your-own, OAuth. Uses the access/refresh/
+  //                    rootFolder/connectedEmail fields below.
+  //   'CUSTOM_S3'    — bring-your-own S3-compatible bucket (AWS S3,
+  //                    Cloudflare R2, Wasabi, Backblaze B2, DigitalOcean
+  //                    Spaces, MinIO). Uses the s3* fields below. The org
+  //                    owns the bucket and the bill; we only hold keys.
+  //   'HOSTED_S3'    — our shared bucket, plan-gated on
+  //                    PLANS.storageQuotaGB. No per-org connection details
+  //                    at all; objects are namespaced by orgId.
+  // Fields belonging to another provider stay null.
+  provider          String       @default("GOOGLE_DRIVE") @map("provider")
+  accessToken       String?      @map("access_token")
+  refreshToken      String?      @map("refresh_token")
+  tokenExpiresAt    DateTime?    @map("token_expires_at")
+  rootFolderId      String?      @map("root_folder_id")
+  connectedEmail    String?      @map("connected_email")
+  // ── CUSTOM_S3 ──
+  // s3AccessKeyId and s3SecretAccessKey are encrypted at rest with
+  // ENCRYPTION_KEY, same as the OAuth tokens above — these are credentials
+  // to a customer's own cloud account and a database dump must not hand
+  // them over. s3Label is cosmetic ('Cloudflare R2'), so the Storage page
+  // can say which service without re-deriving it from the endpoint.
+  s3Bucket          String?      @map("s3_bucket")
+  s3Region          String?      @map("s3_region")
+  s3Endpoint        String?      @map("s3_endpoint")
+  s3AccessKeyId     String?      @map("s3_access_key_id")
+  s3SecretAccessKey String?      @map("s3_secret_access_key")
+  s3ForcePathStyle  Boolean?     @map("s3_force_path_style")
+  // Optional key prefix, so a customer can point us at a folder inside a
+  // bucket they already use for other things.
+  s3Prefix          String?      @map("s3_prefix")
+  s3Label           String?      @map("s3_label")
+  connectedByUserId String       @map("connected_by_user_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  org               Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  connectedBy       User         @relation(fields: [connectedByUserId], references: [id])
+
+  @@map("storage_configs")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  changes    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
+
+model Tag {
+  id          String       @id @default(cuid())
+  name        String
+  color       String       @default("#6B7280")
+  module      String       @default("ALL")
+  orgId       String       @map("org_id")
+  records     RecordTag[]
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId, module])
+  @@map("tags")
+}
+
+/// Attaches a Tag to any record, the same way Comment, Attachment and Task do.
+///
+/// Tags previously existed only as `contact_tags` and `deal_tags` — two
+/// hardcoded join tables that nothing outside the demo seed ever read, and
+/// that would have needed a thirteenth table to cover the thirteenth entity
+/// type. This replaces both (the migration backfills their rows).
+///
+/// `orgId` is stored rather than derived through the Tag so a "show me
+/// everything tagged Churn Risk" query is one indexed lookup, and so the
+/// tenant boundary does not depend on a join.
+model RecordTag {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  tagId       String       @map("tag_id")
+  entityType  EntityType   @map("entity_type")
+  entityId    String       @map("entity_id")
+  createdById String?      @map("created_by_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  tag         Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy   User?        @relation("RecordTagAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Applying a tag twice is a no-op, not a duplicate row.
+  @@unique([tagId, entityType, entityId])
+  // "which tags are on this record" — the read every detail view does.
+  @@index([orgId, entityType, entityId])
+  // "which records carry this tag" — the filter and the tag-usage count.
+  @@index([orgId, tagId])
+  @@map("record_tags")
+}
+
+model Contact {
+  id          String       @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  jobTitle    String?      @map("job_title")
+  accountId   String?      @map("account_id")
+  source      String?
+  // Date-only (time component ignored) — powers the DATE_FIELD_REACHED
+  // workflow trigger's YEARLY recurrence (birthday wishes). See
+  // utils/dateAutomation.ts.
+  dateOfBirth DateTime?    @map("date_of_birth")
+  ownerId     String       @map("owner_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  orgId       String       @map("org_id")
+  activities Activity[]
+  account    Account?     @relation(fields: [accountId], references: [id])
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner      User         @relation("ContactOwner", fields: [ownerId], references: [id])
+  deals      Deal[]
+  leads      Lead[]
+  tickets    Ticket[]
+
+  @@index([orgId])
+  @@map("contacts")
+}
+
+model Account {
+  id        String       @id @default(cuid())
+  name      String
+  industry  String?
+  website   String?
+  phone     String?
+  address   String?
+  ownerId   String       @map("owner_id")
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  orgId     String       @map("org_id")
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner     User         @relation("AccountOwner", fields: [ownerId], references: [id])
+  contacts  Contact[]
+  deals     Deal[]
+
+  @@index([orgId])
+  @@map("accounts")
+}
+
+model Pipeline {
+  id        String       @id @default(cuid())
+  name      String
+  stages    Json
+  isDefault Boolean      @default(false) @map("is_default")
+  createdAt DateTime     @default(now()) @map("created_at")
+  orgId     String       @map("org_id")
+  deals     Deal[]
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("pipelines")
+}
+
+model Lead {
+  id            String       @id @default(cuid())
+  contactId     String?      @map("contact_id")
+  source        String?
+  status        LeadStatus   @default(NEW)
+  assignedTo    String?      @map("assigned_to")
+  convertedAt   DateTime?    @map("converted_at")
+  dealId        String?      @map("deal_id")
+  notes         String?
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  aiScore       Int?         @map("ai_score")
+  aiScoreReason String?      @map("ai_score_reason")
+  // Which department works this lead (Org Structure's Department model) —
+  // same optional, presentation-plus-routing role it plays on tickets.
+  departmentId  String?      @map("department_id")
+  orgId         String       @map("org_id")
+  activities    Activity[]
+  assignee      User?        @relation("LeadAssignee", fields: [assignedTo], references: [id])
+  department    Department?  @relation("LeadDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  contact       Contact?     @relation(fields: [contactId], references: [id])
+  deal          Deal?        @relation(fields: [dealId], references: [id])
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("leads")
+}
+
+model Deal {
+  id          String        @id @default(cuid())
+  title       String
+  value       Decimal       @default(0) @db.Decimal(12, 2)
+  stage       String
+  probability Int           @default(0)
+  closeDate   DateTime?     @map("close_date")
+  pipelineId  String?       @map("pipeline_id")
+  contactId   String?       @map("contact_id")
+  accountId   String?       @map("account_id")
+  assignedTo  String?       @map("assigned_to")
+  // Department credited with / working this deal — optional, like tickets.
+  departmentId String?      @map("department_id")
+  status      DealStatus    @default(OPEN)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  orgId       String        @map("org_id")
+  activities  Activity[]
+  history     DealHistory[]
+  account     Account?      @relation(fields: [accountId], references: [id])
+  assignee    User?         @relation("DealAssignee", fields: [assignedTo], references: [id])
+  department  Department?   @relation("DealDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  contact     Contact?      @relation(fields: [contactId], references: [id])
+  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  pipeline    Pipeline?     @relation(fields: [pipelineId], references: [id])
+  leads       Lead[]
+  quotes      Quote[]
+  invoices    Invoice[]
+
+  @@index([orgId])
+  @@map("deals")
+}
+
+model DealHistory {
+  id        String   @id @default(cuid())
+  dealId    String   @map("deal_id")
+  fromStage String?  @map("from_stage")
+  toStage   String   @map("to_stage")
+  changedBy String   @map("changed_by")
+  changedAt DateTime @default(now()) @map("changed_at")
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@map("deal_history")
+}
+
+model Activity {
+  id            String       @id @default(cuid())
+  type          ActivityType
+  title         String
+  body          String?
+  dealId        String?      @map("deal_id")
+  contactId     String?      @map("contact_id")
+  // Follow-up activities (calls/emails/meetings/tasks) scheduled against a
+  // Lead before it's converted to a Deal. Nullable — existing deal/contact
+  // activities are untouched. See leads.controller.ts listActivities/
+  // createActivity/completeActivity.
+  leadId        String?      @map("lead_id")
+  dueAt         DateTime?    @map("due_at")
+  done          Boolean      @default(false)
+  createdBy     String       @map("created_by")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  orgId         String       @map("org_id")
+  contact       Contact?     @relation(fields: [contactId], references: [id])
+  createdByUser User         @relation(fields: [createdBy], references: [id])
+  deal          Deal?        @relation(fields: [dealId], references: [id])
+  lead          Lead?        @relation(fields: [leadId], references: [id])
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([leadId])
+  @@map("activities")
+}
+
+model SlaPolicy {
+  id                String       @id @default(cuid())
+  name              String
+  responseHours     Int          @map("response_hours")
+  resolutionHours   Int          @map("resolution_hours")
+  priorityOverrides Json?        @map("priority_overrides")
+  // Who gets an in-app + push notification when a ticket under this policy
+  // breaches its resolution deadline (see utils/slaMonitor.ts). Optional —
+  // orgs that would rather route breaches through a Workflows rule (any
+  // recipient logic, Slack/Teams/email/WhatsApp) can leave this unset and
+  // build an SLA_BREACH-triggered rule instead; the two aren't exclusive,
+  // both fire on the same breach event.
+  notifyUserId      String?      @map("notify_user_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  orgId             String       @map("org_id")
+  categories        Category[]
+  notifyUser        User?        @relation("SlaPolicyNotifyUser", fields: [notifyUserId], references: [id])
+  org               Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("sla_policies")
+}
+
+model Category {
+  id              String             @id @default(cuid())
+  name            String
+  parentId        String?            @map("parent_id")
+  slaPolicyId     String?            @map("sla_policy_id")
+  autoAssignGroup String?            @map("auto_assign_group")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  orgId           String             @map("org_id")
+  org             Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent          Category?          @relation("CategoryParent", fields: [parentId], references: [id])
+  children        Category[]         @relation("CategoryParent")
+  slaPolicy       SlaPolicy?         @relation(fields: [slaPolicyId], references: [id])
+  articles        KnowledgeArticle[]
+  tickets         Ticket[]
+
+  @@index([orgId])
+  @@map("categories")
+}
+
+model Ticket {
+  id            String          @id @default(cuid())
+  title         String
+  body          String
+  categoryId    String?         @map("category_id")
+  priority      TicketPriority  @default(MEDIUM)
+  status        TicketStatus    @default(OPEN)
+  requesterId   String          @map("requester_id")
+  // Set when an agent creates a ticket "on behalf of" a CRM Contact rather
+  // than an internal User (Contacts have no login, so requesterId still has
+  // to point at *some* User — the creating agent's own id — for the ticket
+  // to satisfy that required FK; this field is what actually identifies the
+  // real requester in that case). Also what SEND_CSAT_SURVEY / SEND_WHATSAPP
+  // resolve against when an automation's recipient is set to "the linked
+  // contact" — see notification-recipient.ts.
+  contactId     String?         @map("contact_id")
+  // Which department this request is raised to (IT, HR, Facilities, …) —
+  // the same HR Department model Org Structure manages. Optional: orgs that
+  // never define departments see no change. Drives queue filtering and
+  // department-based auto-routing rules (condition field departmentName).
+  departmentId  String?         @map("department_id")
+  assignedTo    String?         @map("assigned_to")
+  slaDueAt      DateTime?       @map("sla_due_at")
+  resolvedAt    DateTime?       @map("resolved_at")
+  closedAt      DateTime?       @map("closed_at")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  orgId         String          @map("org_id")
+  portalUserId  String?         @map("portal_user_id")
+  sentiment     String?         @default("NEUTRAL")
+  csatResponses CsatResponse[]
+  breaches      SlaBreaches[]
+  assets        TicketAsset[]
+  history       TicketHistory[]
+  assignee      User?           @relation("TicketAssignee", fields: [assignedTo], references: [id])
+  department    Department?     @relation("TicketDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  category      Category?       @relation(fields: [categoryId], references: [id])
+  org           Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  requester     User            @relation("TicketRequester", fields: [requesterId], references: [id])
+  contact       Contact?        @relation(fields: [contactId], references: [id])
+  timeEntries   TimeEntry[]
+
+  @@index([orgId])
+  @@map("tickets")
+}
+
+model TicketHistory {
+  id         String        @id @default(cuid())
+  ticketId   String        @map("ticket_id")
+  fromStatus TicketStatus? @map("from_status")
+  toStatus   TicketStatus  @map("to_status")
+  changedBy  String        @map("changed_by")
+  changedAt  DateTime      @default(now()) @map("changed_at")
+  ticket     Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("ticket_history")
+}
+
+model SlaBreaches {
+  id         String        @id @default(cuid())
+  ticketId   String        @map("ticket_id")
+  breachType SlaBreachType @map("breach_type")
+  breachedAt DateTime      @default(now()) @map("breached_at")
+  ticket     Ticket        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("sla_breaches")
+}
+
+model KnowledgeArticle {
+  id          String        @id @default(cuid())
+  title       String
+  body        String
+  categoryId  String?       @map("category_id")
+  status      ArticleStatus @default(DRAFT)
+  authorId    String        @map("author_id")
+  publishedAt DateTime?     @map("published_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  orgId       String        @map("org_id")
+  author      User          @relation(fields: [authorId], references: [id])
+  category    Category?     @relation(fields: [categoryId], references: [id])
+  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("knowledge_articles")
+}
+
+model Asset {
+  id           String        @id @default(cuid())
+  name         String
+  type         String
+  serialNumber String?       @map("serial_number")
+  assignedTo   String?       @map("assigned_to")
+  status       String        @default("active")
+  purchaseDate DateTime?     @map("purchase_date")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  orgId        String        @map("org_id")
+  assignee     User?         @relation(fields: [assignedTo], references: [id])
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  tickets      TicketAsset[]
+
+  @@index([orgId])
+  @@map("assets")
+}
+
+model TicketAsset {
+  ticketId String @map("ticket_id")
+  assetId  String @map("asset_id")
+  asset    Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  ticket   Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, assetId])
+  @@map("ticket_assets")
+}
+
+model EmailAccount {
+  id         String       @id @default(cuid())
+  orgId      String       @unique @map("org_id")
+  email      String
+  imapHost   String       @map("imap_host")
+  imapPort   Int          @default(993) @map("imap_port")
+  smtpHost   String       @map("smtp_host")
+  smtpPort   Int          @default(587) @map("smtp_port")
+  password   String
+  lastSyncAt DateTime?    @map("last_sync_at")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("email_accounts")
+}
+
+model WhatsAppConfig {
+  id           String       @id @default(cuid())
+  orgId        String       @unique @map("org_id")
+  accountSid   String       @map("account_sid")
+  authToken    String       @map("auth_token")
+  phoneNumber  String       @map("phone_number")
+  // Where "ORG_DEFAULT"-recipient Schedule/workflow notifications are sent —
+  // distinct from `phoneNumber` above, which is the org's own Twilio
+  // WhatsApp *sender* number customers message. Optional: falls back to
+  // `phoneNumber` if unset.
+  notifyNumber String?      @map("notify_number")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("whatsapp_configs")
+}
+
+model Conversation {
+  id            String       @id @default(cuid())
+  orgId         String       @map("org_id")
+  channel       String
+  contactName   String       @map("contact_name")
+  contactEmail  String?      @map("contact_email")
+  contactPhone  String?      @map("contact_phone")
+  subject       String?
+  status        String       @default("OPEN")
+  assignedTo    String?      @map("assigned_to")
+  externalId    String?      @map("external_id")
+  // Set when channel = 'CHAT' (live chat from the customer portal) — links
+  // the conversation to the PortalUser on the other end, since name/email
+  // string matching (used for email/WhatsApp) isn't reliable for an
+  // authenticated portal session. Null for every other channel.
+  portalUserId  String?      @map("portal_user_id")
+  lastMessageAt DateTime?    @map("last_message_at")
+  unreadCount   Int          @default(0) @map("unread_count")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  assignee      User?        @relation(fields: [assignedTo], references: [id])
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  portalUser    PortalUser?  @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+  messages      Message[]
+
+  @@index([orgId])
+  @@index([orgId, channel])
+  @@index([portalUserId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String       @map("conversation_id")
+  direction      String
+  fromAddress    String       @map("from_address")
+  toAddress      String       @map("to_address")
+  body           String
+  htmlBody       String?      @map("html_body")
+  externalId     String?      @map("external_id")
+  readAt         DateTime?    @map("read_at")
+  sentAt         DateTime     @default(now()) @map("sent_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  // Email-sync dedupe looks messages up by externalId (Message-ID header) on
+  // every synced email; without this index that was a sequential scan of an
+  // ever-growing table, making sync slower forever.
+  @@index([externalId])
+  @@map("messages")
+}
+
+model Notification {
+  id         String       @id @default(cuid())
+  userId     String       @map("user_id")
+  title      String
+  body       String?
+  createdAt  DateTime     @default(now()) @map("created_at")
+  entityId   String?      @map("entity_id")
+  entityType String?      @map("entity_type")
+  orgId      String       @map("org_id")
+  readAt     DateTime?    @map("read_at")
+  type       String
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, userId])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// Browser Push API subscriptions (see utils/webPush.ts). One row per
+// browser/device a user has granted notification permission on — a user
+// with the app open on a laptop and a phone gets two rows, both targeted
+// whenever a push is sent to that userId. `endpoint` is unique because it's
+// the push service's own per-registration URL (FCM/Mozilla/etc.) — the
+// browser hands back the same one on re-subscribe, so this also makes
+// re-subscribing idempotent rather than piling up duplicate rows.
+model PushSubscription {
+  id        String       @id @default(cuid())
+  orgId     String       @map("org_id")
+  userId    String       @map("user_id")
+  endpoint  String       @unique
+  p256dh    String // subscription encryption key
+  auth      String // subscription auth secret
+  createdAt DateTime     @default(now()) @map("created_at")
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model WorkflowRule {
+  id          String        @id @default(cuid())
+  orgId       String        @map("org_id")
+  name        String
+  description String?
+  trigger     String
+  conditions  Json
+  actions     Json
+  // Only set when trigger = 'DATE_FIELD_REACHED': { entityType: 'CONTACT' |
+  // 'CUSTOM_MODULE', moduleId?, dateField, offsetDays, recurrence: 'ONCE' |
+  // 'YEARLY' }. See utils/dateAutomation.ts for the poller that reads it.
+  dateConfig  Json?         @map("date_config")
+  isActive    Boolean       @default(true) @map("is_active")
+  runCount    Int           @default(0) @map("run_count")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  logs        WorkflowLog[]
+  org         Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("workflow_rules")
+}
+
+model WorkflowLog {
+  id         String       @id @default(cuid())
+  ruleId     String       @map("rule_id")
+  entityType String       @map("entity_type")
+  entityId   String       @map("entity_id")
+  result     String
+  detail     String?
+  createdAt  DateTime     @default(now()) @map("created_at")
+  rule       WorkflowRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId])
+  @@map("workflow_logs")
+}
+
+// A user-scheduled reminder/follow-up on a Deal or Ticket that fires a
+// WhatsApp notification when it's due. Polled by a lightweight in-process
+// scheduler (see server/src/utils/scheduler.ts) rather than a job queue —
+// this app runs as a single Node process, so a periodic DB poll is enough.
+model Schedule {
+  id            String       @id @default(cuid())
+  orgId         String       @map("org_id")
+  entityType    String       @map("entity_type") // TICKET | DEAL
+  entityId      String       @map("entity_id")
+  dueAt         DateTime     @map("due_at")
+  recurrence    String       @default("NONE") @map("recurrence") // NONE | DAILY | WEEKLY
+  message       String
+  recipientType String       @map("recipient_type") // CONTACT | ASSIGNEE | CUSTOM_NUMBER | ORG_DEFAULT
+  customNumber  String?      @map("custom_number")
+  status        String       @default("PENDING") @map("status") // PENDING | SENT | FAILED | CANCELLED
+  lastError     String?      @map("last_error")
+  createdBy     String       @map("created_by")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  sentAt        DateTime?    @map("sent_at")
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator       User         @relation(fields: [createdBy], references: [id])
+
+  @@index([orgId, entityType, entityId])
+  @@index([status, dueAt])
+  @@map("schedules")
+}
+
+model PortalUser {
+  id            String         @id @default(cuid())
+  orgId         String         @map("org_id")
+  name          String
+  email         String
+  isActive      Boolean        @default(true) @map("is_active")
+  lastLoginAt   DateTime?      @map("last_login_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  tokens        PortalToken[]
+  conversations Conversation[]
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, email])
+  @@index([orgId])
+  @@map("portal_users")
+}
+
+model PortalToken {
+  id           String     @id @default(cuid())
+  portalUserId String     @map("portal_user_id")
+  tokenHash    String     @unique @map("token_hash")
+  expiresAt    DateTime   @map("expires_at")
+  usedAt       DateTime?  @map("used_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  portalUser   PortalUser @relation(fields: [portalUserId], references: [id], onDelete: Cascade)
+
+  @@map("portal_tokens")
+}
+
+model Subscription {
+  id                   String       @id @default(cuid())
+  orgId                String       @unique @map("org_id")
+  stripeCustomerId     String?      @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?      @unique @map("stripe_subscription_id")
+  plan                 String       @default("FREE")
+  status               String       @default("active")
+  currentPeriodEnd     DateTime?    @map("current_period_end")
+  cancelAtPeriodEnd    Boolean      @default(false) @map("cancel_at_period_end")
+  seats                Int          @default(5)
+  /// Per-org hosted-storage quota override in GB, set by the platform
+  /// operator in the license editor. Null = the plan's default quota
+  /// (PLANS.storageQuotaGB) applies. See utils/licensing.ts.
+  storageQuotaOverrideGb Int?       @map("storage_quota_override_gb")
+  /// Monthly AI token allowance for this org, set by the platform operator.
+  /// Null = unlimited (only the org's own USD budget applies). Enforced as a
+  /// hard cap in utils/aiGateway.ts checkBudget().
+  aiTokenLimitMonthly    Int?       @map("ai_token_limit_monthly")
+  /// Billing interval the org pays on: "month" | "year". See utils/pricing.ts.
+  interval             String       @default("month")
+  /// Feature keys licensed to this org (utils/stripe.ts FeatureKey). Only
+  /// consulted when plan === "CUSTOM"; fixed plans read PLANS[plan].features.
+  features             String[]     @default([])
+  /// Amount Stripe bills per interval, in cents (0 for FREE). Display only.
+  amountCents          Int          @default(0) @map("amount_cents")
+  /// Set by invoice.payment_failed: paid entitlements continue until this
+  /// date, then the org is treated as FREE until payment succeeds.
+  graceUntil           DateTime?    @map("grace_until")
+  lastPaymentFailedAt  DateTime?    @map("last_payment_failed_at")
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  org                  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+model SlackConfig {
+  id                  String       @id @default(cuid())
+  orgId               String       @unique @map("org_id")
+  webhookUrl          String       @map("webhook_url")
+  channel             String       @default("#general")
+  notifyOnNewTicket   Boolean      @default(true) @map("notify_on_new_ticket")
+  notifyOnCritical    Boolean      @default(true) @map("notify_on_critical")
+  notifyOnSlaBreached Boolean      @default(true) @map("notify_on_sla_breached")
+  notifyOnDealWon     Boolean      @default(false) @map("notify_on_deal_won")
+  notifyOnNewLead     Boolean      @default(false) @map("notify_on_new_lead")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  org                 Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("slack_configs")
+}
+
+// Per-org Microsoft Entra ID SSO configuration — each customer registers
+// their own app registration in their own Entra tenant and pastes the
+// tenant/client ID + secret here (see server/src/utils/entraAuth.ts and
+// auth.controller.ts's entraLoginRedirect/entraCallback). `loginSlug` is the
+// public, org-chosen path segment employees use to reach their org's sign-in
+// (client route /login/:loginSlug) — deliberately separate from
+// Organization.slug so an admin can pick something short/memorable without
+// touching the org's internal slug. Phase 1 only: SSO login for existing
+// (invited) users — no auto-provisioning yet, see the integration plan doc.
+model DirectoryConfig {
+  id              String   @id @default(cuid())
+  orgId           String   @unique @map("org_id")
+  tenantId        String   @map("tenant_id")
+  clientId        String   @map("client_id")
+  // encryptSecret()'d — see utils/crypto.ts, same treatment as the connected-
+  // mailbox password. Also reused for the app-only (client_credentials)
+  // token the scheduled sync job uses — see utils/entraAuth.ts
+  // getAppOnlyToken() — so no separate secret is needed for phase 3.
+  clientSecretEnc String   @map("client_secret_enc")
+  loginSlug       String   @unique @map("login_slug")
+  isEnabled       Boolean  @default(true) @map("is_enabled")
+  // Phase 2: when true, a first-time SSO sign-in with no matching CRMITdesk
+  // account creates one instead of being rejected — see auth.controller.ts
+  // entraCallback(). Off by default; a customer has to opt in.
+  autoProvisioningEnabled Boolean @default(false) @map("auto_provisioning_enabled")
+  // Role assigned when a JIT/sync-provisioned user isn't in any group listed
+  // in DirectoryRoleMapping below.
+  defaultRole             UserRole @default(EMPLOYEE) @map("default_role")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("directory_configs")
+}
+
+// Maps an Entra ID security group to a CRMITdesk role. The admin types in
+// the group's Object ID (copied from the Entra portal) and picks a label
+// themselves rather than this being populated from a Graph group picker —
+// listing all of a tenant's groups needs an application-level Graph
+// permission (Group.Read.All, app-only) beyond what sign-in itself requires,
+// which is a heavier ask than this phase needs. A user in multiple mapped
+// groups gets the highest-`priority` match; ties are undefined order.
+model DirectoryRoleMapping {
+  id         String   @id @default(cuid())
+  orgId      String   @map("org_id")
+  groupId    String   @map("group_id")
+  groupLabel String   @map("group_label")
+  role       UserRole
+  priority   Int      @default(0)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, groupId])
+  @@index([orgId])
+  @@map("directory_role_mappings")
+}
+
+// One row per scheduled/manual sync run (phase 3) — see
+// modules/directory/directorySync.ts. Purely observational; nothing reads
+// this back except the admin UI's sync history.
+model DirectorySyncLog {
+  id               String    @id @default(cuid())
+  orgId            String    @map("org_id")
+  startedAt        DateTime  @default(now()) @map("started_at")
+  finishedAt       DateTime? @map("finished_at")
+  status           String    @default("RUNNING") // RUNNING | OK | ERROR
+  usersCreated     Int       @default(0) @map("users_created")
+  usersDeactivated Int       @default(0) @map("users_deactivated")
+  errorMessage     String?   @map("error_message")
+  org              Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, startedAt])
+  @@map("directory_sync_logs")
+}
+
+model CsatResponse {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  ticketId    String       @map("ticket_id")
+  rating      Int
+  comment     String?
+  submittedAt DateTime     @default(now()) @map("submitted_at")
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([ticketId])
+  @@map("csat_responses")
+}
+
+model Campaign {
+  id         String       @id @default(cuid())
+  orgId      String       @map("org_id")
+  name       String
+  subject    String
+  body       String
+  targetType String       @default("LEADS") @map("target_type")
+  status     String       @default("DRAFT")
+  sentAt     DateTime?    @map("sent_at")
+  sentCount  Int          @default(0) @map("sent_count")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("campaigns")
+}
+
+model ChangeRequest {
+  id              String       @id @default(cuid())
+  orgId           String       @map("org_id")
+  title           String
+  description     String
+  type            String       @default("NORMAL")
+  priority        String       @default("MEDIUM")
+  status          String       @default("DRAFT")
+  requestedBy     String       @map("requested_by")
+  assignedTo      String?      @map("assigned_to")
+  plannedStart    DateTime?    @map("planned_start")
+  plannedEnd      DateTime?    @map("planned_end")
+  approvedBy      String?      @map("approved_by")
+  approvedAt      DateTime?    @map("approved_at")
+  rejectedBy      String?      @map("rejected_by")
+  rejectionReason String?      @map("rejection_reason")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  assignee        User?        @relation("ChangeAssignee", fields: [assignedTo], references: [id])
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  requester       User         @relation("ChangeRequester", fields: [requestedBy], references: [id])
+
+  @@index([orgId])
+  @@map("change_requests")
+}
+
+model ApiKey {
+  id         String       @id @default(cuid())
+  orgId      String       @map("org_id")
+  name       String
+  keyHash    String       @unique @map("key_hash")
+  keyPrefix  String       @map("key_prefix")
+  scopes     String[]     @default(["read"])
+  lastUsedAt DateTime?    @map("last_used_at")
+  expiresAt  DateTime?    @map("expires_at")
+  createdBy  String       @map("created_by")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  creator    User         @relation(fields: [createdBy], references: [id])
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("api_keys")
+}
+
+model CustomField {
+  id         String             @id @default(cuid())
+  orgId      String             @map("org_id")
+  entityType String             @map("entity_type")
+  label      String
+  fieldKey   String             @map("field_key")
+  fieldType  String             @map("field_type")
+  options    Json?
+  required   Boolean            @default(false)
+  position   Int                @default(0)
+  // Prefilled into a CREATE form only — never applied to records that already
+  // exist, and never written on the server, so it stays a suggestion the user
+  // can overwrite before saving rather than a value that appears by itself.
+  // Stored as text like every CustomFieldValue.value; the field's own
+  // fieldType decides how it is parsed.
+  defaultValue String?          @map("default_value")
+  // ── Conditional visibility ──
+  // When set, this field is only shown once `dependsOn`'s current value is one
+  // of `dependsOnValues`. The parent is constrained to SELECT/BOOLEAN, since
+  // those are the types with a knowable set of values to pick from.
+  //
+  // onDelete: SetNull, not Cascade: deleting the parent must not delete the
+  // dependent field (and its stored values) — it just stops being conditional
+  // and becomes always-visible, which is the recoverable direction to fail in.
+  dependsOnFieldId String?      @map("depends_on_field_id")
+  dependsOn        CustomField? @relation("CustomFieldDependency", fields: [dependsOnFieldId], references: [id], onDelete: SetNull)
+  dependents       CustomField[] @relation("CustomFieldDependency")
+  /// Array of parent values that reveal this field, e.g. ["HIGH","CRITICAL"].
+  dependsOnValues  Json?        @map("depends_on_values")
+  createdAt  DateTime           @default(now()) @map("created_at")
+  values     CustomFieldValue[]
+  org        Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, entityType, fieldKey])
+  @@index([orgId, entityType])
+  @@map("custom_fields")
+}
+
+model CustomFieldValue {
+  id            String      @id @default(cuid())
+  customFieldId String      @map("custom_field_id")
+  entityId      String      @map("entity_id")
+  value         String?
+  field         CustomField @relation(fields: [customFieldId], references: [id], onDelete: Cascade)
+
+  @@unique([customFieldId, entityId])
+  @@index([entityId])
+  @@map("custom_field_values")
+}
+
+// ─── Custom Modules (no-code object builder) ───────────────────────────────────
+//
+// Distinct from CustomField above: CustomField bolts extra fields onto an
+// *existing* entity (Ticket/Deal/...). A CustomModule is a brand-new entity
+// type an org admin defines from scratch — its own fields, its own records,
+// its own nav entry — closer to a Salesforce custom object than a form
+// field. Record data is stored schemaless as `data: Json` keyed by
+// `fieldKey` (mirrors the CustomFieldValue pattern of storing everything as
+// a string-able value) rather than a dynamically-altered SQL table, since
+// Postgres DDL can't be safely run per-tenant from application code.
+model CustomModule {
+  id          String    @id @default(cuid())
+  orgId       String    @map("org_id")
+  name        String
+  slug        String
+  icon        String    @default("Layers")
+  description String?
+  // Which sidebar section (AppLayout.tsx's NAV_SECTIONS) this module's nav
+  // entry gets folded into — CRM | IT_DESK | HR | ADMIN. Plain string rather
+  // than a Postgres enum since it only ever needs to round-trip through the
+  // client's own picker and has no other consumer that needs DB-level
+  // constraint checking; an unrecognized value just falls back to CRM in the
+  // sidebar (see AppLayout.tsx). Defaults to CRM to match this feature's
+  // original (pre-picker) hardcoded placement.
+  navSection  String    @default("CRM") @map("nav_section")
+  // Pipeline stages (Phase 2 of the platform play) — ordered array of
+  // { key, label, color } objects. When set, the module's records carry a
+  // `stage` and the client offers a kanban board view; when null the module
+  // is a plain table, exactly as before. Validated in customModules.controller
+  // (StagesSchema) — kept as JSON so reordering/renaming stages is one
+  // update, not a migration.
+  stages      Json?     @map("stages")
+  // Ordered fieldKeys shown as list-view columns. Null = default (first 5).
+  listColumns Json?     @map("list_columns")
+  isActive    Boolean   @default(true) @map("is_active")
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  org         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  fields      CustomModuleField[]
+  records     CustomModuleRecord[]
+  syncConfig  ExternalSyncConfig?
+
+  @@unique([orgId, slug])
+  @@index([orgId])
+  @@map("custom_modules")
+}
+
+model CustomModuleField {
+  id        String       @id @default(cuid())
+  moduleId  String       @map("module_id")
+  label     String
+  fieldKey  String       @map("field_key")
+  // TEXT | TEXTAREA | NUMBER | CURRENCY | DATE | BOOLEAN | DROPDOWN | EMAIL | PHONE | URL | RELATION
+  fieldType String       @map("field_type")
+  options   Json?        // DROPDOWN: string[] of choices
+  // RELATION fields: the CustomModule this field points at (same org; may be
+  // this module itself for parent/child links). The record stores the target
+  // record's id in data[fieldKey].
+  relationModuleId String? @map("relation_module_id")
+  // OR a core entity — CONTACT | ACCOUNT | DEAL | TICKET — so custom records
+  // can hang off the CRM/desk spine ("this Vehicle's Buyer is contact X"),
+  // and the universal related view (related.controller.ts) can list them
+  // under that contact/deal/ticket. Exactly one of relationModuleId /
+  // relationEntity is set for a RELATION field.
+  relationEntity   String? @map("relation_entity")
+  required  Boolean      @default(false)
+  isPrimary Boolean      @default(false) @map("is_primary") // rendered as the record's title in list views
+  position  Int          @default(0)
+  createdAt DateTime     @default(now()) @map("created_at")
+  module    CustomModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, fieldKey])
+  @@index([moduleId])
+  @@map("custom_module_fields")
+}
+
+model CustomModuleRecord {
+  id         String       @id @default(cuid())
+  moduleId   String       @map("module_id")
+  orgId      String       @map("org_id")
+  data       Json         // { [fieldKey]: value }
+  // Current pipeline stage key (one of the module's stages[].key), null for
+  // modules without stages or records created before stages were added —
+  // the client buckets those under the first stage on the board.
+  stage      String?      @map("stage")
+  source     String       @default("MANUAL") // MANUAL | SYNC
+  // Dedupe key for SYNC-sourced records — the value of the external system's
+  // id field (ExternalSyncConfig.externalIdField), so re-polling upserts
+  // instead of duplicating. Null for MANUAL records.
+  externalId String?      @map("external_id")
+  createdBy  String?      @map("created_by")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  module     CustomModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, externalId])
+  @@index([moduleId])
+  @@index([moduleId, stage])
+  @@index([orgId])
+  @@map("custom_module_records")
+}
+
+// Outbound-polling sync: we periodically GET/POST a configured external URL,
+// pull records out of the response (at `recordPath`), validate each one
+// against the module's field schema, and upsert into CustomModuleRecord
+// (deduped on `externalIdField`). Follows the same setInterval-poller shape
+// as scheduler.ts — see server/src/utils/customModuleSync.ts.
+model ExternalSyncConfig {
+  id              String       @id @default(cuid())
+  moduleId        String       @unique @map("module_id")
+  url             String
+  method          String       @default("GET")
+  authType        String       @default("NONE") @map("auth_type") // NONE | API_KEY | BEARER
+  authHeaderName  String?      @map("auth_header_name")
+  authValue       String?      @map("auth_value")
+  pollIntervalMin Int          @default(15) @map("poll_interval_min")
+  recordPath      String?      @map("record_path")       // dot path to the array of records in the response, e.g. "data.items"
+  externalIdField String?      @map("external_id_field") // key (in the *external* record) used to dedupe on re-sync
+  fieldMapping    Json         @map("field_mapping")      // { [customModuleFieldKey]: externalResponseKey }
+  isActive        Boolean      @default(true) @map("is_active")
+  lastSyncAt      DateTime?    @map("last_sync_at")
+  lastStatus      String?      @map("last_status") // SUCCESS | FAILED
+  lastError       String?      @map("last_error")
+  lastRecordCount Int?         @map("last_record_count")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  module          CustomModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@map("external_sync_configs")
+}
+
+// ─── Templates ────────────────────────────────────────────────────────────────
+
+// A named set of default field values (standard + custom) for one entity
+// type. Picking a template on the entity's "New" form pre-fills the form —
+// it does not create the record by itself.
+model RecordTemplate {
+  id                String       @id @default(cuid())
+  orgId             String       @map("org_id")
+  entityType        String       @map("entity_type") // TICKET | CONTACT | DEAL | LEAD
+  name              String
+  description       String?
+  fieldValues       Json         @map("field_values")       // default values for standard fields, e.g. { priority: "HIGH" }
+  customFieldValues Json?        @map("custom_field_values") // default values for custom fields, keyed by fieldKey
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+  org               Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, entityType, name])
+  @@index([orgId, entityType])
+  @@map("record_templates")
+}
+
+// Canned responses agents can insert while replying/commenting on a ticket.
+model ReplyTemplate {
+  id        String       @id @default(cuid())
+  orgId     String       @map("org_id")
+  name      String
+  body      String
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("reply_templates")
+}
+
+// Reusable subject/body pairs selectable when creating a Campaign.
+model EmailTemplate {
+  id        String       @id @default(cuid())
+  orgId     String       @map("org_id")
+  name      String
+  subject   String
+  body      String
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("email_templates")
+}
+
+// Predefined line-item bundles selectable when creating a Quote.
+model QuoteTemplate {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  name        String
+  description String?
+  lines       Json         // [{ description, quantity, unitPrice, discount? }]
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("quote_templates")
+}
+
+model OrgBranding {
+  id            String       @id @default(cuid())
+  orgId         String       @unique @map("org_id")
+  logoUrl       String?      @map("logo_url")
+  faviconUrl    String?      @map("favicon_url")
+  companyName   String?      @map("company_name")
+  primaryColor  String       @default("#2563eb") @map("primary_color")
+  supportEmail  String?      @map("support_email")
+  portalTitle   String       @default("Support Portal") @map("portal_title")
+  portalWelcome String?      @map("portal_welcome")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("org_branding")
+}
+
+model TeamsConfig {
+  id                  String       @id @default(cuid())
+  orgId               String       @unique @map("org_id")
+  webhookUrl          String       @map("webhook_url")
+  notifyOnNewTicket   Boolean      @default(true) @map("notify_on_new_ticket")
+  notifyOnCritical    Boolean      @default(true) @map("notify_on_critical")
+  notifyOnSlaBreached Boolean      @default(true) @map("notify_on_sla_breached")
+  notifyOnDealWon     Boolean      @default(false) @map("notify_on_deal_won")
+  notifyOnNewLead     Boolean      @default(false) @map("notify_on_new_lead")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  org                 Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("teams_configs")
+}
+
+model TimeEntry {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  ticketId    String       @map("ticket_id")
+  userId      String       @map("user_id")
+  description String?
+  minutes     Int
+  loggedAt    DateTime     @default(now()) @map("logged_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  ticket      Ticket       @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id])
+
+  @@index([orgId])
+  @@index([ticketId])
+  @@map("time_entries")
+}
+
+model Quote {
+  id         String       @id @default(cuid())
+  orgId      String       @map("org_id")
+  dealId     String?      @map("deal_id")
+  title      String
+  status     String       @default("DRAFT")
+  notes      String?
+  validUntil DateTime?    @map("valid_until")
+  createdBy  String       @map("created_by")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+  // In-app e-signature capture, set when a quote transitions to ACCEPTED via
+  // the customer-facing accept link (see quotes.controller.ts acceptQuote).
+  // Not a legally-certified e-signature product — a hand-drawn signature
+  // (signatureImage, a base64 PNG data URL from a canvas pad) plus a typed
+  // name/email and an IP/timestamp audit trail, stamped onto the quote view.
+  signerName     String?   @map("signer_name")
+  signerEmail    String?   @map("signer_email")
+  signedAt       DateTime? @map("signed_at")
+  signerIp       String?   @map("signer_ip")
+  signatureImage String?   @map("signature_image") @db.Text
+  lines      QuoteLine[]
+  creator    User         @relation("QuoteCreator", fields: [createdBy], references: [id])
+  deal       Deal?        @relation(fields: [dealId], references: [id])
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invoices   Invoice[]
+
+  @@index([orgId])
+  @@map("quotes")
+}
+
+model QuoteLine {
+  id          String  @id @default(cuid())
+  quoteId     String  @map("quote_id")
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(12, 2)
+  discount    Decimal @default(0) @db.Decimal(5, 2)
+  quote       Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@map("quote_lines")
+}
+
+// ─── HR: Attendance ─────────────────────────────────────────────────────────
+
+// An org's physical office(s) — attendance check-in/out is only accepted if
+// the employee is within `radiusMeters` of at least one active location AND
+// (unless skipped) their request's public IP matches `allowedIps`. Multiple
+// rows support multi-branch orgs; a single-office org just has one.
+model OfficeLocation {
+  id            String       @id @default(cuid())
+  orgId         String       @map("org_id")
+  name          String
+  latitude      Float
+  longitude     Float
+  radiusMeters  Int          @default(150) @map("radius_meters")
+  // Comma-separated list of exact IPv4 addresses and/or basic CIDR blocks
+  // (e.g. "203.0.113.5,198.51.100.0/24") — see utils/attendanceVerification.ts
+  // ipMatchesAllowlist(). Blank/null means the IP check is skipped for this
+  // location (geofence-only).
+  allowedIps    String?      @map("allowed_ips")
+  isActive      Boolean      @default(true) @map("is_active")
+  /// Optional roll-up to the HR/asset Location concept. Null keeps the
+  /// pre-existing standalone geo-fence behaviour untouched.
+  locationId    String?      @map("location_id")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  location      Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([orgId])
+  @@map("office_locations")
+}
+
+// One row per check-in/check-out SESSION, not per day — an employee can
+// check in and out multiple times in the same calendar day (e.g. steps out
+// for lunch, a field visit, a split shift) and each session gets its own
+// verification snapshot. A day's total worked time is the sum of
+// (checkOutAt - checkInAt) across every session sharing that (userId, date)
+// — see attendanceVerification.ts's sumWorkedMinutes() — rather than a
+// single pair of columns, which only ever supported one session/day. A
+// manager's manual entry (source = MANUAL) is just another session row that
+// skips geofence/IP verification.
+model AttendanceRecord {
+  id                    String       @id @default(cuid())
+  orgId                 String       @map("org_id")
+  userId                String       @map("user_id")
+  date                  DateTime     @db.Date
+  checkInAt             DateTime?    @map("check_in_at")
+  checkInLat            Float?       @map("check_in_lat")
+  checkInLng            Float?       @map("check_in_lng")
+  checkInIp             String?      @map("check_in_ip")
+  checkInLocationOk     Boolean?     @map("check_in_location_ok")
+  checkInNetworkOk      Boolean?     @map("check_in_network_ok")
+  checkOutAt            DateTime?    @map("check_out_at")
+  checkOutLat           Float?       @map("check_out_lat")
+  checkOutLng           Float?       @map("check_out_lng")
+  checkOutIp            String?      @map("check_out_ip")
+  checkOutLocationOk    Boolean?     @map("check_out_location_ok")
+  checkOutNetworkOk     Boolean?     @map("check_out_network_ok")
+  // MANUAL rows are created by a manager (POST .../manual), not the
+  // employee's own check-in/out, and skip geofence/IP verification entirely.
+  source                String       @default("SELF") @map("source") // SELF | MANUAL
+  notes                 String?
+  // Face verification at check-in (see AttendancePolicy / FaceEnrollment).
+  // Null = the org didn't require it at the time; false = attempted and
+  // failed (never persisted — a failed match rejects the check-in) so in
+  // practice rows carry true or null. Distance is the euclidean distance
+  // between the live descriptor and the closest enrolled sample.
+  checkInFaceOk         Boolean?     @map("check_in_face_ok")
+  checkInFaceDistance   Float?       @map("check_in_face_distance")
+  /// Small JPEG data URL of the selfie captured at check-in, kept as evidence for managers.
+  checkInSelfie         String?      @map("check_in_selfie")
+  /// Overall result of the org's check-in rule (AttendancePolicy.checkInRule) at the time.
+  checkInPassed         Boolean?     @map("check_in_passed")
+  checkOutFaceOk        Boolean?     @map("check_out_face_ok")
+  checkOutFaceDistance  Float?       @map("check_out_face_distance")
+  checkOutSelfie        String?      @map("check_out_selfie")
+  checkOutPassed        Boolean?     @map("check_out_passed")
+  /// How the session was closed: SELF (button) | MANUAL (manager) | AUTO_GEOFENCE (left the office) | AUTO_TIMEOUT (app went silent)
+  checkOutSource        String?      @map("check_out_source")
+  /// Last location heartbeat while the session was open (POST /hr/attendance/heartbeat)
+  lastSeenAt            DateTime?    @map("last_seen_at")
+  lastSeenLat           Float?       @map("last_seen_lat")
+  lastSeenLng           Float?       @map("last_seen_lng")
+  lastSeenInside        Boolean?     @map("last_seen_inside")
+  /// First heartbeat that placed the user outside every office radius; cleared when they come back
+  outsideSince          DateTime?    @map("outside_since")
+  /// Last "open the app to update your location" push sent for this session
+  lastNudgedAt          DateTime?    @map("last_nudged_at")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  org                   Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  locationPings         AttendanceLocationPing[]
+
+  @@index([userId, date])
+  @@index([orgId, date])
+  @@map("attendance_records")
+}
+
+// Per-org attendance rules. One row per org (created on first read).
+model AttendancePolicy {
+  id                       String       @id @default(cuid())
+  orgId                    String       @unique @map("org_id")
+  /// Which signals check-in / check-out require and how they combine —
+  /// { location, network, face: boolean; mode: "ALL" | "ANY"; enforce: boolean }.
+  /// See utils/attendanceRules.ts for defaults and evaluation. Null = default
+  /// (check-in: location AND network, enforced; check-out: same, recorded only).
+  checkInRule              Json?        @map("check_in_rule")
+  checkOutRule             Json?        @map("check_out_rule")
+  /// Close the open session automatically once the user has been outside every
+  /// office radius for autoCheckoutAfterMinutes (needs the app open to send
+  /// location heartbeats; see utils/attendanceAutoCheckout.ts).
+  autoCheckoutOnLeave      Boolean      @default(false) @map("auto_checkout_on_leave")
+  autoCheckoutAfterMinutes Int          @default(5) @map("auto_checkout_after_minutes")
+  /// Also close a session when no heartbeat arrives for this many minutes
+  /// (app closed / phone off). 0 = off.
+  heartbeatTimeoutMinutes  Int          @default(0) @map("heartbeat_timeout_minutes")
+  /// Managers can see each checked-in employee's live position and the day's
+  /// trail on Attendance → Live map. Location is only collected while a session
+  /// is open and the app is running; employees see a notice on their page.
+  shareLiveLocation        Boolean      @default(false) @map("share_live_location")
+  /// Days of location pings kept for the trail view (older rows are purged nightly)
+  locationRetentionDays    Int          @default(30) @map("location_retention_days")
+  /// When a checked-in person's location goes stale for this long, send a push
+  /// notification asking them to open the app (browsers can't read GPS while the
+  /// app is closed). 0 = never nudge. Repeats at most every nudgeRepeatMinutes.
+  nudgeAfterMinutes        Int          @default(10) @map("nudge_after_minutes")
+  nudgeRepeatMinutes       Int          @default(30) @map("nudge_repeat_minutes")
+  /// Max euclidean distance between live and enrolled descriptors to count as
+  /// a match. face-api's conventional threshold is 0.6; 0.5 is stricter.
+  faceMatchThreshold       Float        @default(0.5) @map("face_match_threshold")
+  /// Keep the check-in selfie on the attendance record for manager review.
+  keepCheckInSelfie        Boolean      @default(true) @map("keep_check_in_selfie")
+  createdAt                DateTime     @default(now()) @map("created_at")
+  updatedAt                DateTime     @updatedAt @map("updated_at")
+  org                      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("attendance_policies")
+}
+
+// One location ping per heartbeat while a session is open and the org shares
+// live location — powers the manager's live map and per-day trail.
+model AttendanceLocationPing {
+  id        String           @id @default(cuid())
+  orgId     String           @map("org_id")
+  userId    String           @map("user_id")
+  recordId  String           @map("record_id")
+  at        DateTime         @default(now())
+  lat       Float
+  lng       Float
+  accuracy  Float?
+  inside    Boolean?
+  org       Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  record    AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, at])
+  @@index([userId, at])
+  @@map("attendance_location_pings")
+}
+
+// A user's enrolled reference face: several 128-float descriptors produced
+// in the browser by the face-recognition model (client/src/shared/face.ts),
+// never the photos themselves. Biometric data — deleted with the user, and
+// removable by the user or a manager at any time.
+model FaceEnrollment {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  userId      String       @unique @map("user_id")
+  /// number[][] — each inner array is one 128-dim descriptor sample
+  descriptors Json
+  samples     Int          @default(0)
+  /// Small JPEG data URL of one enrolment selfie, shown back to the user/manager as "this is what's enrolled".
+  referenceSelfie String?  @map("reference_selfie")
+  enrolledAt  DateTime     @default(now()) @map("enrolled_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("face_enrollments")
+}
+
+// ─── HR: Leave Management ───────────────────────────────────────────────────
+
+model LeaveType {
+  id            String         @id @default(cuid())
+  orgId         String         @map("org_id")
+  name          String
+  annualQuota   Int            @default(12) @map("annual_quota") // days per calendar year
+  isPaid        Boolean        @default(true) @map("is_paid")
+  color         String         @default("#6366f1")
+  isActive      Boolean        @default(true) @map("is_active")
+  /// Unused days roll into next year, up to carryForwardMaxDays; they lapse carryForwardExpiryMonths into the new year (0 = never)
+  carryForward           Boolean @default(false) @map("carry_forward")
+  carryForwardMaxDays    Int     @default(0) @map("carry_forward_max_days")
+  carryForwardExpiryMonths Int   @default(0) @map("carry_forward_expiry_months")
+  allowHalfDay  Boolean        @default(true) @map("allow_half_day")
+  /// Days available before any approval, for LOP-type leave (unpaid, unlimited)
+  isUnlimited   Boolean        @default(false) @map("is_unlimited")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leaveRequests LeaveRequest[]
+  balanceAdjustments LeaveBalanceAdjustment[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("leave_types")
+}
+
+model LeaveRequest {
+  id              String       @id @default(cuid())
+  orgId           String       @map("org_id")
+  userId          String       @map("user_id")
+  leaveTypeId     String       @map("leave_type_id")
+  startDate       DateTime     @db.Date @map("start_date")
+  endDate         DateTime     @db.Date @map("end_date")
+  days            Decimal      @db.Decimal(5, 1) // inclusive count; 0.5 for a half day
+  halfDay         Boolean      @default(false) @map("half_day")
+  halfDayPeriod   String?      @map("half_day_period") // AM | PM
+  reason          String?
+  status          String       @default("PENDING") @map("status") // PENDING | APPROVED | REJECTED | CANCELLED
+  /// Set when a manager applied on the employee's behalf
+  appliedBy       String?      @map("applied_by")
+  decidedBy       String?      @map("decided_by")
+  decidedAt       DateTime?    @map("decided_at")
+  rejectionReason String?      @map("rejection_reason")
+  cancelledBy     String?      @map("cancelled_by")
+  cancelledAt     DateTime?    @map("cancelled_at")
+  cancelReason    String?      @map("cancel_reason")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user            User         @relation("LeaveRequester", fields: [userId], references: [id], onDelete: Cascade)
+  decider         User?        @relation("LeaveDecider", fields: [decidedBy], references: [id])
+  leaveType       LeaveType    @relation(fields: [leaveTypeId], references: [id])
+
+  @@index([orgId, userId])
+  @@index([orgId, status])
+  @@map("leave_requests")
+}
+
+/// Manual balance credits/debits set by an admin (opening balance, comp-off, carry-forward correction).
+model LeaveBalanceAdjustment {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  userId      String       @map("user_id")
+  leaveTypeId String       @map("leave_type_id")
+  year        Int
+  days        Decimal      @db.Decimal(5, 1)
+  reason      String?
+  createdBy   String       @map("created_by")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveType   LeaveType    @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, userId, year])
+  @@map("leave_balance_adjustments")
+}
+
+// ─── HR: Attendance policy engine ───────────────────────────────────────────
+//
+// An org can have several policy groups (head office 9–6, factory shifts, a
+// branch with Saturday working). utils/attendanceEngine.ts picks the group
+// for an employee by applicability (explicit users > location > department >
+// employment type > default) and turns raw check-in/out records into a
+// day status — PRESENT / LATE / HALF_DAY / ABSENT / … — plus hours, late and
+// overtime minutes, which payroll (phase 3) consumes.
+
+model AttendancePolicyGroup {
+  id                      String       @id @default(cuid())
+  orgId                   String       @map("org_id")
+  name                    String
+  isDefault               Boolean      @default(false) @map("is_default")
+  isActive                Boolean      @default(true) @map("is_active")
+  /// Shift timing, local to the org/location timezone, "HH:mm"
+  shiftStart              String       @default("09:00") @map("shift_start")
+  shiftEnd                String       @default("18:00") @map("shift_end")
+  /// Override the org timezone for this group (e.g. a branch abroad)
+  timezone                String?
+  /// Arrivals up to this many minutes after shiftStart are on time
+  graceMinutes            Int          @default(15) @map("grace_minutes")
+  /// Ordered bands after grace: [{ untilMinutes: 60, status: "LATE" }, { untilMinutes: 180, status: "HALF_DAY" }, { untilMinutes: null, status: "ABSENT" }]
+  lateBands               Json?        @map("late_bands")
+  /// Minimum worked minutes for a full / half day; below half = ABSENT (unless leave/holiday)
+  minFullDayMinutes       Int          @default(480) @map("min_full_day_minutes")
+  minHalfDayMinutes       Int          @default(240) @map("min_half_day_minutes")
+  /// Leaving earlier than shiftEnd − grace flags EARLY; earlyDepartureStatus decides its effect (NONE | HALF_DAY)
+  earlyDepartureGraceMinutes Int       @default(15) @map("early_departure_grace_minutes")
+  earlyDepartureStatus    String       @default("NONE") @map("early_departure_status")
+  /// Overtime counts after shiftEnd + this many minutes; 0 = OT off
+  overtimeAfterMinutes    Int          @default(0) @map("overtime_after_minutes")
+  overtimeMinMinutes      Int          @default(30) @map("overtime_min_minutes")
+  /// Late-arrival policy: lates beyond lateAllowedPerMonth convert — every lateConversionEvery extra lates = one lateConversionUnit (HALF_DAY | LOP | NONE)
+  lateAllowedPerMonth     Int          @default(3) @map("late_allowed_per_month")
+  lateConversionEvery     Int          @default(3) @map("late_conversion_every")
+  lateConversionUnit      String       @default("HALF_DAY") @map("late_conversion_unit")
+  /// Weekly offs as weekday numbers, 0 = Sunday … 6 = Saturday
+  weeklyOffs              Int[]        @default([0, 6]) @map("weekly_offs")
+  /// Missing check-out: assume shiftEnd (true) or count as ABSENT for the day (false)
+  assumeShiftEndOnMissingCheckout Boolean @default(false) @map("assume_shift_end_on_missing_checkout")
+  /// { departmentIds, locationIds, employmentTypes, userIds }
+  applicability           Json?
+  createdAt               DateTime     @default(now()) @map("created_at")
+  updatedAt               DateTime     @updatedAt @map("updated_at")
+  org                     Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  days                    AttendanceDay[]
+
+  @@index([orgId])
+  @@map("attendance_policy_groups")
+}
+
+model Holiday {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  date        DateTime     @db.Date
+  name        String
+  /// Empty = every location
+  locationIds String[]     @default([]) @map("location_ids")
+  isOptional  Boolean      @default(false) @map("is_optional")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, date, name])
+  @@index([orgId, date])
+  @@map("holidays")
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  HALF_DAY
+  ABSENT
+  LEAVE
+  UNPAID_LEAVE
+  WFH
+  HOLIDAY
+  WEEK_OFF
+  LOP
+}
+
+/// One employee-day. COMPUTED rows are (re)derived from check-in/out records
+/// by the engine; MANUAL rows were set by an admin and are never overwritten
+/// by recomputation. Every manual change is recorded in AttendanceAudit.
+model AttendanceDay {
+  id              String           @id @default(cuid())
+  orgId           String           @map("org_id")
+  userId          String           @map("user_id")
+  date            DateTime         @db.Date
+  status          AttendanceStatus
+  source          String           @default("COMPUTED") // COMPUTED | MANUAL
+  policyGroupId   String?          @map("policy_group_id")
+  firstInAt       DateTime?        @map("first_in_at")
+  lastOutAt       DateTime?        @map("last_out_at")
+  workedMinutes   Int              @default(0) @map("worked_minutes")
+  lateMinutes     Int              @default(0) @map("late_minutes")
+  earlyMinutes    Int              @default(0) @map("early_minutes")
+  overtimeMinutes Int              @default(0) @map("overtime_minutes")
+  /// Paid fraction of the day for payroll: 1, 0.5 or 0
+  paidFraction    Decimal          @default(1) @db.Decimal(3, 2) @map("paid_fraction")
+  leaveRequestId  String?          @map("leave_request_id")
+  /// Why the engine chose the status ("arrived 74 min late", "worked 3h50 < 4h half-day minimum")
+  reason          String?
+  notes           String?
+  updatedBy       String?          @map("updated_by")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  policyGroup     AttendancePolicyGroup? @relation(fields: [policyGroupId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, date])
+  @@index([orgId, date])
+  @@map("attendance_days")
+}
+
+/// Who changed what on attendance/leave data, with before/after snapshots.
+model AttendanceAudit {
+  id         String       @id @default(cuid())
+  orgId      String       @map("org_id")
+  userId     String       @map("user_id")     // the employee affected
+  date       DateTime?    @db.Date
+  entityType String       @map("entity_type") // ATTENDANCE_DAY | ATTENDANCE_RECORD | LEAVE_REQUEST | LEAVE_BALANCE
+  entityId   String?      @map("entity_id")
+  action     String       // MARK | CORRECT | REGULARISE | TIME_EDIT | LEAVE_APPLY_ON_BEHALF | LEAVE_CANCEL | LEAVE_MODIFY | CONVERT_TO_LEAVE | BALANCE_ADJUST
+  before     Json?
+  after      Json?
+  reason     String?
+  changedBy  String       @map("changed_by")
+  changedAt  DateTime     @default(now()) @map("changed_at")
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User         @relation("AttendanceAuditSubject", fields: [userId], references: [id], onDelete: Cascade)
+  changer    User         @relation("AttendanceAuditChanger", fields: [changedBy], references: [id], onDelete: Cascade)
+
+  @@index([orgId, userId, changedAt])
+  @@map("attendance_audits")
+}
+
+// ─── HR: Payroll ─────────────────────────────────────────────────────────────
+
+// An employee's current pay components. Editing (POST .../structures with an
+// existing id in the body, see payroll.controller.ts upsertStructure)
+// deactivates the prior row rather than mutating it in place, so past
+// payslips keep pointing at the structure that was actually in effect when
+// they were generated (Payslip.salaryStructureId, onDelete: SetNull) — only
+// one row per (orgId, userId) has isActive true at a time.
+model SalaryStructure {
+  id              String   @id @default(cuid())
+  orgId           String   @map("org_id")
+  userId          String   @map("user_id")
+  basic           Decimal  @db.Decimal(12, 2)
+  hra             Decimal  @default(0) @db.Decimal(12, 2)
+  allowances      Decimal  @default(0) @db.Decimal(12, 2)
+  // Employer/employee provident-fund contribution, as a % of basic.
+  pfPercent       Decimal  @default(12) @db.Decimal(5, 2) @map("pf_percent")
+  professionalTax Decimal  @default(0) @db.Decimal(12, 2) @map("professional_tax")
+  otherDeductions Decimal  @default(0) @db.Decimal(12, 2) @map("other_deductions")
+  effectiveFrom   DateTime @db.Date @map("effective_from")
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  org             Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payslips        Payslip[]
+
+  @@index([orgId, userId])
+  @@map("salary_structures")
+}
+
+// One "process payroll for a month" action (payroll.controller.ts runPayroll)
+// snapshots every active employee's current SalaryStructure into a Payslip.
+// Re-running the same (orgId, month, year) is blocked by the unique
+// constraint below — corrections happen on the individual Payslip rows, not
+// by re-running the whole month.
+model PayrollRun {
+  id             String   @id @default(cuid())
+  orgId          String   @map("org_id")
+  /// Month/year of the period start (kept for display and legacy uniqueness of monthly runs)
+  month          Int // 1-12
+  year           Int
+  payrollCycleId String?  @map("payroll_cycle_id")
+  periodStart    DateTime? @db.Date @map("period_start")
+  periodEnd      DateTime? @db.Date @map("period_end")
+  /// DRAFT (computed, under review) → PROCESSED (finalised, payslips issued) → PAID
+  status         String   @default("PROCESSED") @map("status")
+  runBy          String   @map("run_by")
+  runAt          DateTime @default(now()) @map("run_at")
+  finalizedAt    DateTime? @map("finalized_at")
+  /// ATTENDANCE: paid/LOP/OT days come from the attendance register; CALENDAR: every day paid
+  attendanceMode String   @default("ATTENDANCE") @map("attendance_mode")
+  org            Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runByUser      User          @relation("PayrollRunCreator", fields: [runBy], references: [id])
+  payrollCycle   PayrollCycle? @relation(fields: [payrollCycleId], references: [id], onDelete: SetNull)
+  payslips       Payslip[]
+
+  @@unique([orgId, payrollCycleId, periodStart])
+  @@index([orgId, year, month])
+  @@map("payroll_runs")
+}
+
+// A generated payslip. Earnings/deductions are copied from the employee's
+// SalaryStructure at generation time (not live-computed), so a later edit to
+// the structure never rewrites history.
+model Payslip {
+  id                String    @id @default(cuid())
+  orgId             String    @map("org_id")
+  userId            String    @map("user_id")
+  payrollRunId      String    @map("payroll_run_id")
+  salaryStructureId String?   @map("salary_structure_id")
+  // Sequential per-org display number, e.g. "PAY-2026-08-0001" — same
+  // count-then-format approach as Invoice.invoiceNumber.
+  payslipNumber     String    @map("payslip_number")
+  month             Int
+  year              Int
+  basic             Decimal   @db.Decimal(12, 2)
+  hra               Decimal   @db.Decimal(12, 2)
+  allowances        Decimal   @db.Decimal(12, 2)
+  grossPay          Decimal   @db.Decimal(12, 2) @map("gross_pay")
+  pf                Decimal   @db.Decimal(12, 2)
+  professionalTax   Decimal   @db.Decimal(12, 2) @map("professional_tax")
+  otherDeductions   Decimal   @db.Decimal(12, 2) @map("other_deductions")
+  totalDeductions   Decimal   @db.Decimal(12, 2) @map("total_deductions")
+  netPay            Decimal   @db.Decimal(12, 2) @map("net_pay")
+  status            String    @default("GENERATED") @map("status") // DRAFT | GENERATED | PAID
+  paidAt            DateTime? @map("paid_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  // ── Configurable payroll (component-based) ──
+  employeeSalaryId  String?   @map("employee_salary_id")
+  periodStart       DateTime? @db.Date @map("period_start")
+  periodEnd         DateTime? @db.Date @map("period_end")
+  currency          String    @default("INR")
+  workingDays       Decimal?  @db.Decimal(5, 2) @map("working_days")
+  presentDays       Decimal?  @db.Decimal(5, 2) @map("present_days")
+  paidDays          Decimal?  @db.Decimal(5, 2) @map("paid_days")
+  leaveDays         Decimal?  @db.Decimal(5, 2) @map("leave_days")
+  lopDays           Decimal?  @db.Decimal(5, 2) @map("lop_days")
+  halfDays          Decimal?  @db.Decimal(5, 2) @map("half_days")
+  overtimeHours     Decimal?  @db.Decimal(6, 2) @map("overtime_hours")
+  totalEarnings     Decimal?  @db.Decimal(12, 2) @map("total_earnings")
+  totalReimbursements Decimal? @db.Decimal(12, 2) @map("total_reimbursements")
+  employerContributions Decimal? @db.Decimal(12, 2) @map("employer_contributions")
+  /// Snapshot of the attendance/leave inputs used, for the review screen
+  attendanceSummary Json?     @map("attendance_summary")
+  /// Template pinned at finalise time so a later template edit does not restyle issued payslips
+  templateId        String?   @map("template_id")
+  /// Set when the payslip was emailed to the employee
+  emailedAt         DateTime? @map("emailed_at")
+
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  payrollRun      PayrollRun       @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  salaryStructure SalaryStructure? @relation(fields: [salaryStructureId], references: [id], onDelete: SetNull)
+  employeeSalary  EmployeeSalary?  @relation(fields: [employeeSalaryId], references: [id], onDelete: SetNull)
+  template        PayslipTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  lines           PayslipLine[]
+
+  @@unique([orgId, userId, payrollRunId])
+  @@index([orgId, month, year])
+  @@map("payslips")
+}
+
+// The org's letterhead for the payslip PDF (browser print-to-PDF — see
+// client/src/pages/PayslipPrintPage.tsx), designed once by an HR/org admin
+// and applied to every employee's payslip. Singleton per org, same pattern
+// as OrgBranding; GET /hr/payroll/template returns sensible defaults when no
+// row exists yet so the print view always has something to render.
+model PayslipTemplate {
+  id             String   @id @default(cuid())
+  orgId          String   @map("org_id")
+  /// Several per org (phase 4): "Head office", "Contractors", …
+  name           String   @default("Default")
+  /// STANDARD | MODERN | MINIMAL | DETAILED | COMPACT | CORPORATE | BRANCH | STATEMENT — see utils/payslipRender.ts
+  layout         String   @default("STANDARD")
+  isDefault      Boolean  @default(true) @map("is_default")
+  isActive       Boolean  @default(true) @map("is_active")
+  companyName    String?  @map("company_name")
+  companyAddress String?  @map("company_address")
+  logoUrl        String?  @map("logo_url")
+  primaryColor   String   @default("#2563eb") @map("primary_color")
+  accentColor    String?  @map("accent_color")
+  /// Title printed on the document ("Payslip", "Salary Statement")
+  headerTitle    String   @default("Payslip") @map("header_title")
+  headerNote     String?  @map("header_note")
+  footerNote     String?  @map("footer_note")
+  showSignature  Boolean  @default(true) @map("show_signature")
+  signatureLabel String   @default("Authorized Signatory") @map("signature_label")
+  signatoryName  String?  @map("signatory_name")
+  signatureUrl   String?  @map("signature_url")
+  /// Which optional blocks/fields print — keys in PAYSLIP_FIELDS (utils/payslipRender.ts)
+  showFields     Json?    @map("show_fields")
+  /// { departmentIds, locationIds, employmentTypes } — first matching non-default template wins
+  applicability  Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  payslips       Payslip[]
+
+  @@index([orgId])
+  @@map("payslip_templates")
+}
+
+// ─── HR: Configurable payroll (salary components, cycles, payslip lines) ────
+//
+// Replaces the fixed basic/HRA/allowances/PF/PT/other columns with a per-org
+// catalogue of components (utils/payrollEngine.ts evaluates them). Legacy
+// SalaryStructure rows are migrated into EmployeeSalary overrides; the old
+// Payslip columns stay as denormalised totals so existing payslips render.
+
+enum SalaryComponentCategory {
+  EARNING
+  DEDUCTION
+  REIMBURSEMENT
+  EMPLOYER_CONTRIBUTION
+}
+
+enum SalaryCalcType {
+  FIXED     // amount per period
+  PERCENT   // percent of another component / BASIC / GROSS
+  FORMULA   // expression over component codes and payroll variables
+}
+
+model SalaryComponent {
+  id             String                  @id @default(cuid())
+  orgId          String                  @map("org_id")
+  /// Stable identifier used in formulas and payslip lines, e.g. "BASIC", "HRA", "PF_EMP"
+  code           String
+  name           String
+  category       SalaryComponentCategory
+  calcType       SalaryCalcType          @default(FIXED) @map("calc_type")
+  /// FIXED: default amount per period (per-employee override usual)
+  amount         Decimal?                @db.Decimal(12, 2)
+  /// PERCENT: percent of `percentOf` (a component code, or BASIC / GROSS_EARNINGS / CTC)
+  percent        Decimal?                @db.Decimal(7, 3)
+  percentOf      String?                 @map("percent_of")
+  /// FORMULA: e.g. "min(BASIC * 0.12, 1800)" — see payrollEngine.ts for the grammar
+  formula        String?
+  /// Statutory preset key (PF_EMP, PF_EMPLOYER, ESI_EMP, ESI_EMPLOYER, PT, TDS) with org-editable config
+  statutory      String?
+  statutoryConfig Json?                  @map("statutory_config")
+  /// Prorate by paid days / working days (attendance-linked) — off for e.g. reimbursements
+  prorate        Boolean                 @default(true)
+  taxable        Boolean                 @default(true)
+  showOnPayslip  Boolean                 @default(true) @map("show_on_payslip")
+  displayOrder   Int                     @default(0) @map("display_order")
+  isActive       Boolean                 @default(true) @map("is_active")
+  /// Who the component applies to. Empty lists = everyone.
+  /// { departmentIds: [], locationIds: [], designations: [], employmentTypes: [], userIds: [] }
+  applicability  Json?
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  org            Organization            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, code])
+  @@index([orgId, isActive])
+  @@map("salary_components")
+}
+
+enum PayrollFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+/// A payroll cycle an employee can be assigned to. Periods are calendar-based:
+/// MONTHLY = calendar month; WEEKLY / BIWEEKLY start on `startWeekday` (0 = Sunday);
+/// CUSTOM = `lengthDays` starting from `anchorDate` and repeating.
+model PayrollCycle {
+  id           String           @id @default(cuid())
+  orgId        String           @map("org_id")
+  name         String
+  frequency    PayrollFrequency @default(MONTHLY)
+  startWeekday Int?             @map("start_weekday")
+  anchorDate   DateTime?        @db.Date @map("anchor_date")
+  lengthDays   Int?             @map("length_days")
+  isDefault    Boolean          @default(false) @map("is_default")
+  isActive     Boolean          @default(true) @map("is_active")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  org          Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  salaries     EmployeeSalary[]
+  runs         PayrollRun[]
+
+  @@index([orgId])
+  @@map("payroll_cycles")
+}
+
+/// An employee's pay: which cycle they're on and their per-component values.
+/// Revision pattern (like SalaryStructure): a change deactivates the previous
+/// row so past payslips keep their history.
+model EmployeeSalary {
+  id             String        @id @default(cuid())
+  orgId          String        @map("org_id")
+  userId         String        @map("user_id")
+  payrollCycleId String?       @map("payroll_cycle_id")
+  currency       String        @default("INR")
+  /// Optional annual CTC for display / CTC-based formulas
+  ctcAnnual      Decimal?      @db.Decimal(14, 2) @map("ctc_annual")
+  /// { "<CODE>": { amount?: number, percent?: number, formula?: string, enabled?: boolean } }
+  overrides      Json          @default("{}")
+  effectiveFrom  DateTime      @db.Date @map("effective_from")
+  isActive       Boolean       @default(true) @map("is_active")
+  notes          String?
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  org            Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payrollCycle   PayrollCycle? @relation(fields: [payrollCycleId], references: [id], onDelete: SetNull)
+  payslips       Payslip[]
+
+  @@index([orgId, userId, isActive])
+  @@map("employee_salaries")
+}
+
+/// One line on a payslip — the evaluated value of a component for that period.
+model PayslipLine {
+  id            String                  @id @default(cuid())
+  payslipId     String                  @map("payslip_id")
+  code          String
+  name          String
+  category      SalaryComponentCategory
+  amount        Decimal                 @db.Decimal(12, 2)
+  /// How it was computed, for the review screen: e.g. "12% of BASIC", "fixed", "formula: min(BASIC*0.12,1800)"
+  basis         String?
+  showOnPayslip Boolean                 @default(true) @map("show_on_payslip")
+  displayOrder  Int                     @default(0) @map("display_order")
+  /// Set when a manager adjusted the computed value during review
+  adjusted      Boolean                 @default(false)
+  payslip       Payslip                 @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+
+  @@index([payslipId])
+  @@map("payslip_lines")
+}
+
+// ─── Invoicing ───────────────────────────────────────────────────────────────
+
+// Generated automatically when a Quote is accepted (see quotes.controller.ts
+// publicAccept), or created manually. Document-only — no payment processor
+// integration; staff mark status by hand (mirrors how Quote status already
+// works). Shared publicly via the same deterministic-HMAC-token pattern as
+// Quote's share link (see invoices.controller.ts invoiceShareToken).
+model Invoice {
+  id            String        @id @default(cuid())
+  orgId         String        @map("org_id")
+  quoteId       String?       @map("quote_id")
+  dealId        String?       @map("deal_id")
+  // Sequential per-org display number, e.g. "INV-0001" — assigned at
+  // creation from a per-org counter (see invoices.controller.ts
+  // nextInvoiceNumber). Immutable once set.
+  invoiceNumber String        @map("invoice_number")
+  title         String
+  status        String        @default("DRAFT") // DRAFT | SENT | PAID | OVERDUE | VOID
+  issueDate     DateTime      @default(now()) @map("issue_date")
+  dueDate       DateTime?     @map("due_date")
+  taxRate       Decimal       @default(0) @db.Decimal(5, 2) @map("tax_rate") // percent
+  notes         String?
+  paidAt        DateTime?     @map("paid_at")
+  createdBy     String        @map("created_by")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  lines         InvoiceLine[]
+  creator       User          @relation("InvoiceCreator", fields: [createdBy], references: [id])
+  deal          Deal?         @relation(fields: [dealId], references: [id])
+  quote         Quote?        @relation(fields: [quoteId], references: [id])
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, invoiceNumber])
+  @@index([orgId])
+  @@map("invoices")
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  invoiceId   String  @map("invoice_id")
+  description String
+  quantity    Decimal @default(1) @db.Decimal(10, 2)
+  unitPrice   Decimal @map("unit_price") @db.Decimal(12, 2)
+  discount    Decimal @default(0) @db.Decimal(5, 2)
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_lines")
+}
+
+model TOTPSecret {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  secret      String
+  enabled     Boolean  @default(false)
+  backupCodes String[] @map("backup_codes")
+  createdAt   DateTime @default(now()) @map("created_at")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("totp_secrets")
+}
+
+model AICustomRule {
+  id           String       @id @default(cuid())
+  orgId        String
+  name         String
+  description  String?
+  trigger      String
+  action       String
+  customPrompt String?
+  outputField  String?
+  isActive     Boolean      @default(true)
+  runCount     Int          @default(0)
+  lastRunAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  CRM_MANAGER
+  SALES_REP
+  IT_MANAGER
+  IT_AGENT
+  EMPLOYEE
+  // Cross-org platform operator role — not scoped to any single
+  // Organization (User.orgId is null for these users). Only used by the
+  // platform-admin module (server/src/modules/platform-admin) to view all
+  // orgs' plan/license/branding/sending-connection status in one place.
+  // Never assignable through normal org-scoped invite/user-management UI.
+  PLATFORM_ADMIN
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+}
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SlaBreachType {
+  RESPONSE
+  RESOLUTION
+}
+
+enum EntityType {
+  DEAL
+  TICKET
+  CONTACT
+  LEAD
+  ACCOUNT
+  CHANGE_REQUEST
+  QUOTE
+  ASSET
+  CAMPAIGN
+  // Added with the people/task/approval platform. Every value here must also
+  // appear in utils/entityAccess.ts ENTITY_MODEL, or polymorphic comments and
+  // attachments will silently 404 for that type.
+  EMPLOYEE
+  TASK
+  APPROVAL_REQUEST
+  DEPARTMENT
+  INVOICE
+}
+
+enum NotificationType {
+  ASSIGNMENT
+  COMMENT
+  STATUS_CHANGE
+  SLA_WARNING
+  MENTION
+}
+
+// ─── AI Studio ────────────────────────────────────────────────────────────────
+
+model BusinessContext {
+  id             String       @id @default(cuid())
+  orgId          String       @unique @map("org_id")
+  industry       String?
+  companyDesc    String?      @map("company_desc")
+  terminology    Json?        // Record<string, string> — custom term → definition, fed into AI prompts only
+  // UI-facing relabeling, distinct from `terminology` above: that field only
+  // ever flavors AI prompt text, it was never read by the React UI. This one
+  // actually drives what the product displays — shape is
+  // { entities: { ticket: { singular, plural }, deal: {...}, ... },
+  //   fields:   { ticket: { priority: "Severity", ... }, ... } }
+  // Populated via the "Generate setup" AI flow (see aiStudio.controller.ts
+  // generateSetup/applySetup) or edited directly.
+  labelOverrides Json?        @map("label_overrides")
+  customSystem   String?      @map("custom_system") // extra context injected into AI calls
+  tone           String       @default("professional") // professional | casual | technical
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("business_contexts")
+}
+
+model CustomAIFunction {
+  id           String       @id @default(cuid())
+  orgId        String       @map("org_id")
+  name         String
+  description  String?
+  systemPrompt String       @map("system_prompt")
+  inputSchema  Json         @map("input_schema") // [{name, type, label, required}]
+  outputType   String       @default("text") @map("output_type") // text | json | number
+  isActive     Boolean      @default(true) @map("is_active")
+  runCount     Int          @default(0) @map("run_count")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("custom_ai_functions")
+}
+
+model CustomScript {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  name        String
+  description String?
+  entityType  String       @map("entity_type") // ticket | contact | deal | lead | asset | global
+  trigger     String       // onLoad | onChange | onSubmit | onValidate | onFieldChange
+  fieldTarget String?      @map("field_target") // specific field name, null = entity-level
+  script      String       // sandboxed JS — runs in ScriptEngine
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, entityType, trigger])
+  @@map("custom_scripts")
+}
+
+// Postgres-backed retry queue for at-least-once background delivery (email,
+// Slack/Teams webhooks, web push). Deliberately a DB-polled queue, not a new
+// Redis/BullMQ dependency — see utils/scheduler.ts's doc comment for why this
+// app sticks to plain setInterval + DB polling (single Node process, no
+// infra beyond Postgres on the deploy target). See utils/jobQueue.ts for the
+// enqueue/process/backoff logic that owns this table.
+model BackgroundJob {
+  id            String    @id @default(cuid())
+  // Not a foreign key — some jobs (e.g. platform-wide sends) aren't tied to
+  // a single org, and a job outliving its org (deleted mid-retry) shouldn't
+  // ever be blocked by a constraint. orgId here is purely informational, for
+  // filtering the admin "Failed Jobs" panel to one org.
+  orgId         String?   @map("org_id")
+  type          String    // 'send_email' | 'slack_webhook' | 'teams_webhook' | 'web_push'
+  payload       Json
+  status        String    @default("PENDING") // PENDING | PROCESSING | COMPLETED | FAILED
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(6) @map("max_attempts")
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  lastError     String?   @map("last_error")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  completedAt   DateTime? @map("completed_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([orgId])
+  @@map("background_jobs")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GAP 1 & 2 — PEOPLE PLATFORM: Employee, Department, Team, Location
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Why Employee is a separate model from User, rather than more columns on
+// User: they answer different questions. `User` is "who can log in and what
+// can they do" — it has a password hash, a JWT identity, an SSO link, and it
+// consumes a licensed seat. `Employee` is "who works here" — a factory with
+// 500 staff and 40 software logins needs 500 of the second and 40 of the
+// first. Merging them would either force a login row (and a seat) for every
+// shop-floor worker, or leave HR unable to represent them at all.
+//
+// The link is Employee.userId, optional and unique in both directions:
+//   - Employee with no userId  → staff member who never signs in
+//   - User with no Employee    → external consultant, service account,
+//                                PLATFORM_ADMIN, or a login created before
+//                                the HR module was configured
+// Everything HR-shaped (attendance, leave, payroll, documents, org chart)
+// hangs off Employee. Everything auth-shaped stays on User. Code that needs
+// both resolves through this one relation instead of guessing.
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+  CONSULTANT
+  TEMPORARY
+}
+
+enum EmploymentStatus {
+  PROBATION
+  ACTIVE
+  ON_LEAVE
+  NOTICE_PERIOD
+  SUSPENDED
+  EXITED
+}
+
+enum WorkMode {
+  ONSITE
+  REMOTE
+  HYBRID
+}
+
+enum LocationType {
+  HEAD_OFFICE
+  BRANCH
+  PLANT
+  WAREHOUSE
+  CLIENT_SITE
+  REMOTE
+}
+
+/// A node in the company's org structure. Self-referencing so a customer can
+/// model Sales → Inside Sales → SDR without us prescribing a depth. `headId`
+/// points at an Employee rather than a User because the person who runs a
+/// department may not have a login (see the Employee doc comment).
+model Department {
+  id          String   @id @default(cuid())
+  orgId       String   @map("org_id")
+  name        String
+  code        String?
+  description String?
+  parentId    String?  @map("parent_id")
+  headId      String?  @map("head_id")
+  costCenter  String?  @map("cost_center")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent   Department?  @relation("DepartmentParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children Department[] @relation("DepartmentParent")
+  head     Employee?    @relation("DepartmentHead", fields: [headId], references: [id], onDelete: SetNull)
+
+  employees Employee[] @relation("EmployeeDepartment")
+  teams     Team[]
+  tickets   Ticket[]   @relation("TicketDepartment")
+  leads     Lead[]     @relation("LeadDepartment")
+  deals     Deal[]     @relation("DealDepartment")
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@index([orgId, parentId])
+  @@map("departments")
+}
+
+/// A physical or logical place of work. Distinct from OfficeLocation, which
+/// stays exactly what it was — an attendance geo-fence with a radius and an
+/// IP allowlist. A Location is the HR/asset concept ("Hyderabad Office") and
+/// may have zero or many geo-fences attached to it via OfficeLocation.locationId.
+model Location {
+  id           String       @id @default(cuid())
+  orgId        String       @map("org_id")
+  name         String
+  code         String?
+  type         LocationType @default(BRANCH)
+  addressLine1 String?      @map("address_line1")
+  addressLine2 String?      @map("address_line2")
+  city         String?
+  state        String?
+  country      String?
+  postalCode   String?      @map("postal_code")
+  timezone     String?
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employees       Employee[]
+  officeLocations OfficeLocation[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("locations")
+}
+
+/// The person. See the section header above for why this is not User.
+///
+/// Bank/tax/national-ID columns are stored encrypted via utils/crypto.ts
+/// (same helper as EmailAccount.password) and are additionally registered in
+/// the FieldPermission catalog as MASKED-by-default, so that a role which can
+/// read an employee record does not thereby read their salary account number
+/// — including through search, exports, and AI.
+model Employee {
+  id             String  @id @default(cuid())
+  orgId          String  @map("org_id")
+  /// Optional link to a login. Null = works here, cannot sign in.
+  userId         String? @unique @map("user_id")
+  /// Human-facing identifier (EMP-0001). Unique per org, not globally.
+  employeeCode   String  @map("employee_code")
+
+  firstName      String    @map("first_name")
+  lastName       String?   @map("last_name")
+  displayName    String    @map("display_name")
+  workEmail      String?   @map("work_email")
+  personalEmail  String?   @map("personal_email")
+  phone          String?
+  alternatePhone String?   @map("alternate_phone")
+  dateOfBirth    DateTime? @db.Date @map("date_of_birth")
+  gender         String?
+  maritalStatus  String?   @map("marital_status")
+  bloodGroup     String?   @map("blood_group")
+  photoUrl       String?   @map("photo_url")
+  addressLine1   String?   @map("address_line1")
+  addressLine2   String?   @map("address_line2")
+  city           String?
+  state          String?
+  country        String?
+  postalCode     String?   @map("postal_code")
+
+  designation         String?
+  departmentId        String?  @map("department_id")
+  locationId          String?  @map("location_id")
+  managerId           String?  @map("manager_id")
+  dottedLineManagerId String?  @map("dotted_line_manager_id")
+  costCenter          String?  @map("cost_center")
+  workMode            WorkMode @default(ONSITE) @map("work_mode")
+
+  employmentType   EmploymentType   @default(FULL_TIME) @map("employment_type")
+  employmentStatus EmploymentStatus @default(ACTIVE) @map("employment_status")
+  joiningDate      DateTime         @db.Date @map("joining_date")
+  probationEndDate DateTime?        @db.Date @map("probation_end_date")
+  confirmationDate DateTime?        @db.Date @map("confirmation_date")
+  resignationDate  DateTime?        @db.Date @map("resignation_date")
+  lastWorkingDate  DateTime?        @db.Date @map("last_working_date")
+  exitType         String?          @map("exit_type")
+  exitReason       String?          @map("exit_reason")
+  isRehireEligible Boolean?         @map("is_rehire_eligible")
+
+  // ── Sensitive: encrypted at rest, MASKED by default in FieldPermission ──
+  bankAccountName   String? @map("bank_account_name")
+  bankAccountNumber String? @map("bank_account_number")
+  bankName          String? @map("bank_name")
+  bankIfsc          String? @map("bank_ifsc")
+  taxId             String? @map("tax_id")
+  nationalId        String? @map("national_id")
+  socialSecurityId  String? @map("social_security_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org              Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user             User?        @relation("EmployeeUser", fields: [userId], references: [id], onDelete: SetNull)
+  department       Department?  @relation("EmployeeDepartment", fields: [departmentId], references: [id], onDelete: SetNull)
+  location         Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  manager          Employee?    @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports          Employee[]   @relation("EmployeeManager")
+  dottedLineManager Employee?   @relation("EmployeeDottedLine", fields: [dottedLineManagerId], references: [id], onDelete: SetNull)
+  dottedLineReports Employee[]  @relation("EmployeeDottedLine")
+
+  headedDepartments Department[]            @relation("DepartmentHead")
+  ledTeams          Team[]                  @relation("TeamLead")
+  teamMemberships   TeamMember[]
+  contacts          EmployeeContact[]
+  education         EmployeeEducation[]
+  experience        EmployeeExperience[]
+  skills            EmployeeSkill[]
+  certifications    EmployeeCertification[]
+  documents         EmployeeDocument[]
+  assignedTasks     Task[]                  @relation("TaskEmployeeAssignee")
+
+  @@unique([orgId, employeeCode])
+  @@index([orgId])
+  @@index([orgId, departmentId])
+  @@index([orgId, managerId])
+  @@index([orgId, employmentStatus])
+  @@map("employees")
+}
+
+model EmployeeContact {
+  id           String   @id @default(cuid())
+  employeeId   String   @map("employee_id")
+  name         String
+  relationship String
+  phone        String
+  email        String?
+  address      String?
+  isEmergency  Boolean  @default(true) @map("is_emergency")
+  isPrimary    Boolean  @default(false) @map("is_primary")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("employee_contacts")
+}
+
+model EmployeeEducation {
+  id           String    @id @default(cuid())
+  employeeId   String    @map("employee_id")
+  institution  String
+  degree       String
+  fieldOfStudy String?   @map("field_of_study")
+  startDate    DateTime? @db.Date @map("start_date")
+  endDate      DateTime? @db.Date @map("end_date")
+  grade        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("employee_education")
+}
+
+model EmployeeExperience {
+  id          String    @id @default(cuid())
+  employeeId  String    @map("employee_id")
+  company     String
+  designation String
+  startDate   DateTime  @db.Date @map("start_date")
+  endDate     DateTime? @db.Date @map("end_date")
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("employee_experience")
+}
+
+/// Org-level skill catalog, so "React" is one skill everywhere rather than
+/// six spellings — which is what makes internal talent matching (§32) and
+/// skill-gap detection possible later.
+model Skill {
+  id        String   @id @default(cuid())
+  orgId     String   @map("org_id")
+  name      String
+  category  String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  org       Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employees EmployeeSkill[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("skills")
+}
+
+model EmployeeSkill {
+  id              String   @id @default(cuid())
+  employeeId      String   @map("employee_id")
+  skillId         String   @map("skill_id")
+  /// 1 = beginner … 5 = expert
+  level           Int      @default(3)
+  yearsExperience Decimal? @db.Decimal(4, 1) @map("years_experience")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  skill    Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, skillId])
+  @@index([skillId])
+  @@map("employee_skills")
+}
+
+model EmployeeCertification {
+  id           String    @id @default(cuid())
+  employeeId   String    @map("employee_id")
+  name         String
+  issuer       String?
+  credentialId String?   @map("credential_id")
+  issuedOn     DateTime? @db.Date @map("issued_on")
+  expiresOn    DateTime? @db.Date @map("expires_on")
+  documentId   String?   @map("document_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@index([expiresOn])
+  @@map("employee_certifications")
+}
+
+/// Employee-scoped file. Deliberately separate from the polymorphic
+/// Attachment model: these have an issue/expiry date and a verification
+/// state (an HR clerk confirms the passport is real), which Attachment has
+/// no concept of, and they need their own permission surface — an IT agent
+/// who can see a ticket attachment must not see a colleague's payslip.
+model EmployeeDocument {
+  id         String    @id @default(cuid())
+  orgId      String    @map("org_id")
+  employeeId String    @map("employee_id")
+  type       String
+  name       String
+  fileName   String    @map("file_name")
+  mimeType   String?   @map("mime_type")
+  sizeBytes  Int?      @map("size_bytes")
+  storageKey String    @map("storage_key")
+  issuedOn   DateTime? @db.Date @map("issued_on")
+  expiresOn  DateTime? @db.Date @map("expires_on")
+  isVerified Boolean   @default(false) @map("is_verified")
+  verifiedBy String?   @map("verified_by")
+  verifiedAt DateTime? @map("verified_at")
+  uploadedBy String    @map("uploaded_by")
+  notes      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employee Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, employeeId])
+  @@index([orgId, expiresOn])
+  @@map("employee_documents")
+}
+
+/// An internal working group. Note this is NOT TeamsConfig, which is the
+/// Microsoft Teams webhook integration and keeps its name for compatibility.
+model Team {
+  id           String   @id @default(cuid())
+  orgId        String   @map("org_id")
+  name         String
+  description  String?
+  departmentId String?  @map("department_id")
+  leadId       String?  @map("lead_id")
+  type         String?
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  department Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  lead       Employee?    @relation("TeamLead", fields: [leadId], references: [id], onDelete: SetNull)
+  members    TeamMember[]
+
+  @@unique([orgId, name])
+  @@index([orgId])
+  @@map("teams_internal")
+}
+
+model TeamMember {
+  id         String   @id @default(cuid())
+  teamId     String   @map("team_id")
+  employeeId String   @map("employee_id")
+  role       String   @default("MEMBER")
+  joinedAt   DateTime @default(now()) @map("joined_at")
+
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, employeeId])
+  @@index([employeeId])
+  @@map("team_members")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GAP 3 — UNIFIED TASK & APPROVAL ENGINE
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Task is deliberately NOT Activity. Activity records something that already
+// happened to a CRM record (a call was made, an email went out) and is
+// CRM-only. Task records something that has not happened yet, belongs to
+// someone, is due at a time, and can hang off any entity in the product —
+// a deal, a ticket, an employee's onboarding, an approval. Onboarding and
+// offboarding are both just a generated set of Tasks with a common
+// entityType/entityId, which is why they become possible the moment this
+// model exists.
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskSource {
+  MANUAL
+  WORKFLOW
+  AI
+  ONBOARDING
+  OFFBOARDING
+  APPROVAL
+  RECURRENCE
+  SERVICE_REQUEST
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  title       String
+  description String?
+  status      TaskStatus   @default(OPEN)
+  priority    TaskPriority @default(MEDIUM)
+
+  startAt     DateTime? @map("start_at")
+  dueAt       DateTime? @map("due_at")
+  completedAt DateTime? @map("completed_at")
+
+  /// Either or both may be set. assigneeUserId is who gets the notification
+  /// and whose "My Work" it appears in; assigneeEmployeeId lets a task be
+  /// assigned to a staff member who has no login (their manager actions it).
+  assigneeUserId     String? @map("assignee_user_id")
+  assigneeEmployeeId String? @map("assignee_employee_id")
+  createdBy          String  @map("created_by")
+
+  /// Polymorphic link to whatever this task is about. Uses the shared
+  /// EntityType enum so utils/entityAccess.ts can org-guard it like any
+  /// other polymorphic feature (comments, attachments).
+  entityType EntityType? @map("entity_type")
+  entityId   String?     @map("entity_id")
+
+  parentTaskId String? @map("parent_task_id")
+
+  /// [{ id, text, done, doneAt?, doneBy? }]
+  checklist Json?
+
+  /// iCal RRULE subset, e.g. "FREQ=WEEKLY;BYDAY=MO". Null = one-off.
+  recurrenceRule     String?   @map("recurrence_rule")
+  recurrenceParentId String?   @map("recurrence_parent_id")
+  recurrenceUntil    DateTime? @map("recurrence_until")
+
+  estimateMinutes Int?       @map("estimate_minutes")
+  spentMinutes    Int?       @map("spent_minutes")
+  source          TaskSource @default(MANUAL)
+  tags            String[]   @default([])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  org              Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  assigneeUser     User?            @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  assigneeEmployee Employee?        @relation("TaskEmployeeAssignee", fields: [assigneeEmployeeId], references: [id], onDelete: SetNull)
+  creator          User             @relation("TaskCreator", fields: [createdBy], references: [id])
+  parentTask       Task?            @relation("TaskSubtasks", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  subtasks         Task[]           @relation("TaskSubtasks")
+  dependsOn        TaskDependency[] @relation("TaskDependent")
+  blocks           TaskDependency[] @relation("TaskBlocker")
+
+  @@index([orgId, status])
+  @@index([orgId, assigneeUserId, status])
+  @@index([orgId, entityType, entityId])
+  @@index([orgId, dueAt])
+  @@map("tasks")
+}
+
+model TaskDependency {
+  id              String   @id @default(cuid())
+  taskId          String   @map("task_id")
+  dependsOnTaskId String   @map("depends_on_task_id")
+  /// FINISH_TO_START is the only one enforced today; the column exists so
+  /// adding the other three later doesn't need a migration.
+  type            String   @default("FINISH_TO_START")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  task      Task @relation("TaskDependent", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn Task @relation("TaskBlocker", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([dependsOnTaskId])
+  @@map("task_dependencies")
+}
+
+// ─── Approvals ──────────────────────────────────────────────────────────────
+//
+// One engine, reused by leave, change requests, quotes, expenses, service
+// requests and anything added later. The existing hardcoded approve/reject
+// columns on LeaveRequest and ChangeRequest are intentionally left in place
+// — this engine writes back to them so nothing that reads those columns
+// today has to change (see utils/approvals.ts applyDecisionToSource).
+
+enum ApprovalMode {
+  SEQUENTIAL
+  PARALLEL
+  ANY_ONE
+  UNANIMOUS
+}
+
+enum ApproverType {
+  USER
+  ROLE
+  MANAGER
+  SKIP_LEVEL_MANAGER
+  DEPARTMENT_HEAD
+  TEAM_LEAD
+  DYNAMIC_FIELD
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  EXPIRED
+  SKIPPED
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+  DELEGATED
+}
+
+/// The reusable rule: "expense claims over 50k need the department head then
+/// finance". Conditions are evaluated against a flat fact object supplied by
+/// the caller, using the same operator vocabulary as workflow-engine.ts so
+/// admins only learn one condition language.
+model ApprovalPolicy {
+  id          String       @id @default(cuid())
+  orgId       String       @map("org_id")
+  name        String
+  description String?
+  /// Which kind of record this policy governs, e.g. LEAVE_REQUEST, QUOTE.
+  entityType  String       @map("entity_type")
+  mode        ApprovalMode @default(SEQUENTIAL)
+  /// [{ field, op, value }] — ALL must match for this policy to apply.
+  conditions  Json?
+  /// Higher wins when several policies match the same record.
+  priority    Int          @default(0)
+  /// Auto-expire a pending request after this many hours. Null = never.
+  expiryHours Int?         @map("expiry_hours")
+  /// Nudge/escalate to the approver's manager after this many hours.
+  escalateAfterHours Int?  @map("escalate_after_hours")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  org      Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  steps    ApprovalPolicyStep[]
+  requests ApprovalRequest[]
+
+  @@index([orgId, entityType, isActive])
+  @@map("approval_policies")
+}
+
+model ApprovalPolicyStep {
+  id       String @id @default(cuid())
+  policyId String @map("policy_id")
+  order    Int
+  name     String
+
+  approverType     ApproverType @map("approver_type")
+  approverUserId   String?      @map("approver_user_id")
+  approverRoleKey  String?      @map("approver_role_key")
+  /// For DYNAMIC_FIELD: the fact key holding the approver's user id.
+  approverField    String?      @map("approver_field")
+  /// How many of the resolved approvers must approve for the step to pass.
+  minApprovals     Int          @default(1) @map("min_approvals")
+  isOptional       Boolean      @default(false) @map("is_optional")
+  /// Step-level conditions — lets one policy skip a step for small amounts.
+  conditions       Json?
+
+  policy ApprovalPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, order])
+  @@map("approval_policy_steps")
+}
+
+/// A live approval on one specific record.
+model ApprovalRequest {
+  id          String         @id @default(cuid())
+  orgId       String         @map("org_id")
+  policyId    String?        @map("policy_id")
+  entityType  String         @map("entity_type")
+  entityId    String         @map("entity_id")
+  title       String
+  description String?
+  /// Set for amount-based policies so the threshold is auditable after the
+  /// source record is later edited.
+  amount      Decimal?       @db.Decimal(14, 2)
+  currency    String?
+  requestedBy String         @map("requested_by")
+  status      ApprovalStatus @default(PENDING)
+  currentStep Int            @default(1) @map("current_step")
+  decidedAt   DateTime?      @map("decided_at")
+  expiresAt   DateTime?      @map("expires_at")
+  /// The fact object the conditions were evaluated against, frozen at
+  /// creation time.
+  facts       Json?
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  org       Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  policy    ApprovalPolicy?       @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  requester User                  @relation("ApprovalRequester", fields: [requestedBy], references: [id])
+  steps     ApprovalRequestStep[]
+
+  @@index([orgId, status])
+  @@index([orgId, entityType, entityId])
+  @@index([orgId, requestedBy])
+  @@map("approval_requests")
+}
+
+model ApprovalRequestStep {
+  id           String         @id @default(cuid())
+  requestId    String         @map("request_id")
+  order        Int
+  name         String
+  status       ApprovalStatus @default(PENDING)
+  minApprovals Int            @default(1) @map("min_approvals")
+  /// Resolved at creation time from ApproverType — the concrete user ids who
+  /// may act on this step. Frozen so a later reorg can't silently change who
+  /// was allowed to approve something historically.
+  approverIds  String[]       @default([]) @map("approver_ids")
+  isOptional   Boolean        @default(false) @map("is_optional")
+  decidedAt    DateTime?      @map("decided_at")
+  escalatedAt  DateTime?      @map("escalated_at")
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  request ApprovalRequest  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  actions ApprovalAction[]
+
+  @@unique([requestId, order])
+  @@map("approval_request_steps")
+}
+
+model ApprovalAction {
+  id                  String           @id @default(cuid())
+  stepId              String           @map("step_id")
+  approverId          String           @map("approver_id")
+  /// Set when the approver was acting under a delegation.
+  delegatedFromUserId String?          @map("delegated_from_user_id")
+  decision            ApprovalDecision
+  comment             String?
+  actedAt             DateTime         @default(now()) @map("acted_at")
+
+  step     ApprovalRequestStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  approver User                @relation("ApprovalApprover", fields: [approverId], references: [id])
+
+  @@index([stepId])
+  @@index([approverId])
+  @@map("approval_actions")
+}
+
+/// "I'm on leave 12–20 Aug, Priya approves for me." Consulted at approval
+/// time, so a delegation created after a request is raised still applies.
+model ApprovalDelegation {
+  id         String   @id @default(cuid())
+  orgId      String   @map("org_id")
+  fromUserId String   @map("from_user_id")
+  toUserId   String   @map("to_user_id")
+  startsAt   DateTime @map("starts_at")
+  endsAt     DateTime @map("ends_at")
+  reason     String?
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  from User         @relation("DelegationFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  to   User         @relation("DelegationTo", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, fromUserId, isActive])
+  @@map("approval_delegations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GAP 4 — PERMISSION ENGINE: data-driven roles, record scope, field access
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Rollout is deliberately additive and default-open. Before this, authz was
+// `requireRole(...)` on the route plus `orgId` in the where-clause — which
+// means any SALES_REP who could list deals could list every deal in the org,
+// and salary columns were protected only by which URL you hit.
+//
+// Nothing here changes behavior on its own:
+//   - User.roleId is optional. A user with no Role row falls back to the
+//     UserRole enum exactly as before (see utils/permissions.ts resolveGrants).
+//   - The six built-in roles are seeded with scope = ALL on every permission
+//     they already effectively had, so day-one behavior is byte-identical.
+//   - Controllers opt in one at a time by calling scopedWhere()/redact().
+// Tightening a scope from ALL to TEAM is then a data change an admin makes,
+// not a deploy.
+
+enum PermissionScope {
+  NONE
+  OWN
+  TEAM
+  DEPARTMENT
+  ALL
+}
+
+enum FieldAccess {
+  HIDDEN
+  MASKED
+  READ
+  WRITE
+}
+
+/// A role a customer can actually create. System roles (isSystem) mirror the
+/// six UserRole enum values and cannot be deleted, so existing JWTs and the
+/// e2e suite keep working; everything else is customer-defined.
+model Role {
+  id          String   @id @default(cuid())
+  /// Null for the global system-role templates that every org inherits.
+  orgId       String?  @map("org_id")
+  key         String
+  name        String
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  /// Maps back to the UserRole enum for system roles, so JWT role strings
+  /// resolve to a Role without a second lookup table.
+  legacyRole  String?  @map("legacy_role")
+  /// Lower number = more senior. Used to stop a role escalating itself.
+  rank        Int      @default(100)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org              Organization?     @relation(fields: [orgId], references: [id], onDelete: Cascade, map: "roles_org_fk")
+  permissions      RolePermission[]
+  fieldPermissions FieldPermission[]
+  users            User[]            @relation("UserRoleRef")
+
+  @@unique([orgId, key])
+  @@index([orgId])
+  @@map("roles")
+}
+
+/// The catalog of what can be permitted. Global (no orgId) and seeded from
+/// utils/permissions.ts PERMISSION_CATALOG so code and data can't drift.
+model Permission {
+  id          String @id @default(cuid())
+  /// "crm.deal.read", "hr.employee.update", "hr.payslip.read"
+  key         String @unique
+  module      String
+  resource    String
+  action      String
+  label       String
+  description String?
+  /// Marks permissions that expose personal/financial data, so the admin UI
+  /// can flag them and AI governance can refuse them by default.
+  isSensitive Boolean @default(false) @map("is_sensitive")
+
+  roles RolePermission[]
+
+  @@index([module, resource])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id            String          @id @default(cuid())
+  roleId        String          @map("role_id")
+  permissionKey String          @map("permission_key")
+  scope         PermissionScope @default(ALL)
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@unique([roleId, permissionKey])
+  @@index([permissionKey])
+  @@map("role_permissions")
+}
+
+/// Per-field visibility. Absent row = inherit the resource-level permission,
+/// which keeps the table small: only exceptions are stored.
+model FieldPermission {
+  id        String      @id @default(cuid())
+  orgId     String?     @map("org_id")
+  roleId    String      @map("role_id")
+  /// Matches Permission.resource, e.g. "employee", "payslip", "deal".
+  resource  String
+  field     String
+  access    FieldAccess @default(READ)
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, resource, field])
+  @@index([roleId, resource])
+  @@map("field_permissions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GAP 5 — KNOWLEDGE / RAG LAYER + AI MODEL GATEWAY
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Embeddings are stored as Float[] (Postgres double precision[]) rather than
+// a pgvector column, because Prisma cannot type `vector` natively and this
+// has to run on managed Postgres instances where the extension may not be
+// installable. utils/vectorStore.ts probes for pgvector once at boot: if
+// present it maintains a shadow `embedding_vec vector` column plus an
+// ivfflat index and does ANN in SQL; if not, it filters candidates in SQL
+// and computes cosine in Node. Same API either way, so the fallback is a
+// performance difference, never a behavioral one.
+
+enum KnowledgeSourceType {
+  KB_ARTICLE
+  TICKET
+  HR_POLICY
+  DEAL
+  ACCOUNT
+  UPLOAD
+  WEB
+  CUSTOM
+}
+
+enum KnowledgeVisibility {
+  PUBLIC
+  INTERNAL
+  RESTRICTED
+}
+
+model KnowledgeSource {
+  id           String              @id @default(cuid())
+  orgId        String              @map("org_id")
+  type         KnowledgeSourceType
+  name         String
+  config       Json?
+  isActive     Boolean             @default(true) @map("is_active")
+  lastSyncedAt DateTime?           @map("last_synced_at")
+  lastError    String?             @map("last_error")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  org       Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  documents KnowledgeDocument[]
+
+  @@index([orgId, type])
+  @@map("knowledge_sources")
+}
+
+model KnowledgeDocument {
+  id         String  @id @default(cuid())
+  orgId      String  @map("org_id")
+  sourceId   String? @map("source_id")
+  /// Where this came from in the product, so a retrieved chunk can cite a
+  /// clickable record rather than an opaque blob.
+  entityType String? @map("entity_type")
+  entityId   String? @map("entity_id")
+  externalId String? @map("external_id")
+
+  title       String
+  url         String?
+  mimeType    String? @map("mime_type")
+  /// sha256 of the source text — lets re-indexing skip unchanged documents.
+  contentHash String  @map("content_hash")
+  language    String?
+  version     Int     @default(1)
+
+  visibility           KnowledgeVisibility @default(INTERNAL)
+  /// Empty array = no role restriction beyond `visibility`.
+  allowedRoleKeys      String[]            @default([]) @map("allowed_role_keys")
+  allowedDepartmentIds String[]            @default([]) @map("allowed_department_ids")
+  /// Permission key a retriever must hold to surface this document at all.
+  requiredPermission   String?             @map("required_permission")
+
+  tokenCount Int?      @map("token_count")
+  isActive   Boolean   @default(true) @map("is_active")
+  indexedAt  DateTime? @map("indexed_at")
+  metadata   Json?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  org    Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  source KnowledgeSource?  @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  chunks KnowledgeChunk[]
+
+  @@unique([orgId, entityType, entityId])
+  @@index([orgId, isActive])
+  @@index([orgId, contentHash])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id         String @id @default(cuid())
+  orgId      String @map("org_id")
+  documentId String @map("document_id")
+  chunkIndex Int    @map("chunk_index")
+  content    String
+  tokenCount Int?   @map("token_count")
+
+  /// Source of truth for the vector. See the section note on pgvector.
+  embedding      Float[]  @default([])
+  embeddingModel String?  @map("embedding_model")
+  embeddingDim   Int?     @map("embedding_dim")
+  /// Denormalised from the parent document so retrieval can filter without
+  /// a join on the hot path.
+  visibility     KnowledgeVisibility @default(INTERNAL)
+  heading        String?
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  org      Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([orgId, visibility])
+  @@map("knowledge_chunks")
+}
+
+// ─── Model gateway ──────────────────────────────────────────────────────────
+
+enum AiCallStatus {
+  SUCCESS
+  ERROR
+  CACHED
+  BLOCKED
+  BUDGET_EXCEEDED
+}
+
+/// A configured LLM vendor. Null orgId = platform-level default available to
+/// every tenant; a row with an orgId is that customer's own key (§80's
+/// "customer-managed API keys"). apiKey is encrypted via utils/crypto.ts.
+model AiProvider {
+  id              String   @id @default(cuid())
+  orgId           String?  @map("org_id")
+  key             String
+  name            String
+  baseUrl         String?  @map("base_url")
+  apiKeyEncrypted String?  @map("api_key_encrypted")
+  isActive        Boolean  @default(true) @map("is_active")
+  /// Lower runs first; the gateway falls through on failure.
+  priority        Int      @default(100)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  org    Organization?   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  models AiModelConfig[]
+
+  @@unique([orgId, key])
+  @@map("ai_providers")
+}
+
+model AiModelConfig {
+  id         String @id @default(cuid())
+  providerId String @map("provider_id")
+  modelName  String @map("model_name")
+  /// Which logical jobs this model may serve: FAST, SMART, EMBEDDING, VISION.
+  taskTypes  String[] @default([]) @map("task_types")
+
+  contextWindow    Int?     @map("context_window")
+  maxOutputTokens  Int?     @map("max_output_tokens")
+  inputCostPer1k   Decimal? @db.Decimal(10, 6) @map("input_cost_per_1k")
+  outputCostPer1k  Decimal? @db.Decimal(10, 6) @map("output_cost_per_1k")
+  supportsJson     Boolean  @default(true) @map("supports_json")
+  supportsTools    Boolean  @default(false) @map("supports_tools")
+  embeddingDim     Int?     @map("embedding_dim")
+  priority         Int      @default(100)
+  isActive         Boolean  @default(true) @map("is_active")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  provider AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, modelName])
+  @@map("ai_model_configs")
+}
+
+/// Every LLM round-trip, one row. This is what makes §41 governance, §78
+/// feedback, §79 observability and §81 cost control possible — and it's why
+/// an AI-performed action stops being indistinguishable from a human one in
+/// the audit log.
+model AiInteractionLog {
+  id       String @id @default(cuid())
+  orgId    String @map("org_id")
+  userId   String? @map("user_id")
+  /// Product surface that made the call, e.g. "lead.score", "ai.command".
+  feature  String
+  taskType String @map("task_type")
+
+  providerKey String @map("provider_key")
+  model       String
+
+  promptTokens     Int     @default(0) @map("prompt_tokens")
+  completionTokens Int     @default(0) @map("completion_tokens")
+  totalTokens      Int     @default(0) @map("total_tokens")
+  costUsd          Decimal @default(0) @db.Decimal(12, 6) @map("cost_usd")
+  latencyMs        Int     @default(0) @map("latency_ms")
+
+  status       AiCallStatus @default(SUCCESS)
+  errorMessage String?      @map("error_message")
+
+  entityType String? @map("entity_type")
+  entityId   String? @map("entity_id")
+  /// Set when this call resulted in an AI_ACTIONS registry execution.
+  actionName String? @map("action_name")
+  actionExecuted Boolean @default(false) @map("action_executed")
+  approvedBy String? @map("approved_by")
+
+  confidence Decimal? @db.Decimal(5, 4)
+  /// [{ documentId, chunkId, title, url }] backing the answer.
+  citations  Json?
+
+  /// Truncated for debugging; full prompts are deliberately not retained.
+  promptPreview   String? @map("prompt_preview")
+  responsePreview String? @map("response_preview")
+  /// Fields the permission layer stripped before the model saw the data.
+  redactedFields  String[] @default([]) @map("redacted_fields")
+
+  feedback       String?   @map("feedback")
+  feedbackReason String?   @map("feedback_reason")
+  feedbackBy     String?   @map("feedback_by")
+  feedbackAt     DateTime? @map("feedback_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?        @relation("AiLogUser", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+  @@index([orgId, feature])
+  @@index([orgId, status])
+  @@index([orgId, userId])
+  @@map("ai_interaction_logs")
+}
+
+/// Spend ceiling per org per period. `hardStop` decides whether hitting the
+/// limit degrades gracefully (skip AI, return the non-AI fallback) or errors.
+model AiBudget {
+  id                    String   @id @default(cuid())
+  orgId                 String   @map("org_id")
+  period                String   @default("MONTHLY")
+  limitUsd              Decimal  @db.Decimal(12, 2) @map("limit_usd")
+  alertThresholdPercent Int      @default(80) @map("alert_threshold_percent")
+  hardStop              Boolean  @default(false) @map("hard_stop")
+  currentSpendUsd       Decimal  @default(0) @db.Decimal(12, 6) @map("current_spend_usd")
+  periodStart           DateTime @map("period_start")
+  periodEnd             DateTime @map("period_end")
+  alertSentAt           DateTime? @map("alert_sent_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, period, periodStart])
+  @@index([orgId])
+  @@map("ai_budgets")
+}
+
+// ─── Team Chat ────────────────────────────────────────────────────────────────
+// Real-time human-to-human chat: direct messages between two org members
+// (kind=DM, dmKey = the two user ids sorted and joined with ':') and a live
+// thread attached to any record (kind=RECORD, entityType+entityId). Delivery
+// rides the existing SSE layer; DM events go only to the two participants
+// (sseManager.sendToUsers), never org-wide.
+
+model ChatThread {
+  id            String            @id @default(cuid())
+  orgId         String            @map("org_id")
+  kind          String            // 'DM' | 'RECORD'
+  dmKey         String?           @map("dm_key")
+  entityType    String?           @map("entity_type")
+  entityId      String?           @map("entity_id")
+  lastMessageAt DateTime?         @map("last_message_at")
+  // The @ai assistant's proposed action awaiting an in-thread "@ai confirm".
+  pendingPlan   Json?             @map("pending_plan")
+  pendingPlanBy String?           @map("pending_plan_by")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  org           Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  messages      ChatMessage[]
+  participants  ChatParticipant[]
+
+  @@unique([orgId, dmKey])
+  @@unique([orgId, entityType, entityId])
+  @@index([orgId, lastMessageAt])
+  @@map("chat_threads")
+}
+
+model ChatParticipant {
+  id         String     @id @default(cuid())
+  threadId   String     @map("thread_id")
+  userId     String     @map("user_id")
+  lastReadAt DateTime?  @map("last_read_at")
+  thread     ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, userId])
+  @@index([userId])
+  @@map("chat_participants")
+}
+
+model ChatMessage {
+  id          String     @id @default(cuid())
+  threadId    String     @map("thread_id")
+  // Null author = the @ai assistant speaking in the thread.
+  authorId    String?    @map("author_id")
+  isAssistant Boolean    @default(false) @map("is_assistant")
+  body        String
+  createdAt   DateTime   @default(now()) @map("created_at")
+  thread      ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author      User?      @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+  @@map("chat_messages")
+}
+
+// ─── Workspace identity (Phase 1 of the platform play) ───────────────────────
+// One row per org holding the "invisible CRM" skin: what the product is
+// called, which nav sections/items are hidden, and what everything is renamed
+// to. Kept as a single validated JSON blob (see workspace.controller.ts
+// ConfigSchema) rather than columns so Phases 2-4 (module pipelines, AI
+// Solution Builder output, solution templates) can extend the shape without
+// a migration each time. Terminology for the 4 core entities continues to
+// live in BusinessContext.labelOverrides (AI Studio) — this config is about
+// navigation & app identity, and the two compose client-side.
+model WorkspaceConfig {
+  id        String   @id @default(cuid())
+  orgId     String   @unique @map("org_id")
+  config    Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_configs")
+}
+
+// ─── Solution templates (Phase 4 of the platform play) ───────────────────────
+// A saved workspace blueprint — the exact JSON shape the AI Solution Builder
+// emits (solutionBuilder.controller.ts BlueprintSchema), captured from a
+// configured org via the snapshot endpoint. `isShared` makes it visible to
+// every org on this install: that's the white-label partner flow, where the
+// partner perfects one org and stamps the result onto each new client org.
+// Deleting the creator org cascades its templates away with it.
+model SolutionTemplate {
+  id          String   @id @default(cuid())
+  orgId       String   @map("org_id")
+  name        String
+  description String?
+  isShared    Boolean  @default(false) @map("is_shared")
+  blueprint   Json
+  createdBy   String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([isShared])
+  @@map("solution_templates")
+}
+
+
+model WebForm {
+  id               String    @id @default(cuid())
+  orgId            String    @map("org_id")
+  name             String
+  // LEAD | TICKET — which record a submission creates.
+  type             String
+  isActive         Boolean   @default(true) @map("is_active")
+  // Optional heading/intro shown on the hosted page.
+  title            String?
+  intro            String?
+  submissionCount  Int       @default(0) @map("submission_count")
+  lastSubmissionAt DateTime? @map("last_submission_at")
+  // Secret for server-to-server intake (Zoho webhooks, Google Apps Script,
+  // Zapier). Sent as the x-intake-token header: proves the caller really is
+  // the org's own integration and lifts the per-IP rate limit.
+  intakeToken      String?   @unique @map("intake_token")
+  createdBy        String    @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@map("web_forms")
+}

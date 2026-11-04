@@ -1,0 +1,2 @@
+ALTER TABLE "organizations" ADD COLUMN "currency" TEXT NOT NULL DEFAULT 'USD';
+ALTER TABLE "organizations" ADD COLUMN "timezone" TEXT NOT NULL DEFAULT 'UTC';

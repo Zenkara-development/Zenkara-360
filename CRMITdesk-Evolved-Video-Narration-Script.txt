@@ -1,0 +1,74 @@
+CRMITdesk Evolved — Video Narration Script
+==================================================
+
+Estimated runtime at 150 wpm: ~6.8 minutes across 23 slides.
+
+SLIDE 1  (~13.9s)
+Meet CRMITdesk Evolved. It's a single platform that brings your sales pipeline and your IT help desk together, with AI woven into almost every screen instead of bolted on as an afterthought.
+
+SLIDE 2  (~26.7s)
+Most growing businesses end up running a CRM and a help desk as two completely separate tools. That means two logins, two databases, and no shared view of the customer — support can't see the deal that was just signed, and sales has no idea a customer has three open tickets. Worse, every integration, automation, and report has to be built and maintained twice.
+
+SLIDE 3  (~19.5s)
+CRMITdesk Evolved fixes that by running sales and support side by side — same contacts, same organization, same login. On top of that shared foundation, we've layered AI across the whole platform, and a no-code automation engine that connects the two sides without needing a developer.
+
+SLIDE 4  (~13.9s)
+Everything we're about to show you falls into three pillars: an all-in-one platform for CRM and IT support, AI built into nearly every screen, and no-code automation that connects it all together.
+
+SLIDE 5  (~5.1s)
+Let's start with the first pillar: the all-in-one platform itself.
+
+SLIDE 6  (~23.5s)
+On the sales side, teams capture leads, qualify them, and convert them into deals in one click. A drag-and-drop board moves deals across your pipeline stages, quotes go out with proper line items, and campaigns reach your whole contact base. Built-in forecasting shows funnel value, win rate, and a probability-weighted revenue forecast — no spreadsheet required.
+
+SLIDE 7  (~20.3s)
+On the support side, tickets carry categories and priorities, and SLA deadlines are calculated automatically the moment a ticket is created. A knowledge base, an IT asset inventory, and ITIL-style change management round out the help desk — and every resolved ticket automatically triggers a customer satisfaction survey.
+
+SLIDE 8  (~16.3s)
+Email and WhatsApp conversations both land in one shared inbox, updating live as messages arrive. Agents filter by channel or status and always know who's already handling a conversation — so nothing falls through the cracks between channels.
+
+SLIDE 9  (~19.5s)
+And your customers get their own lightweight, branded portal. They log in with a secure, passwordless magic link, submit and track their own tickets, and see your logo and colors instead of ours — so it feels like part of your product, not a bolted-on tool.
+
+SLIDE 10  (~7.1s)
+The second pillar is AI — and this is where CRMITdesk Evolved really stands apart.
+
+SLIDE 11  (~22.7s)
+For sales, leads are scored automatically with a plain-language reason attached to every score. AI drafts follow-up emails and full nurture sequences, predicts win probability and likely close dates from your own pipeline history, and flags churn risk right on the contact page — so reps spend their time on the deals that matter.
+
+SLIDE 12  (~16.7s)
+For support, agents get suggested replies grounded in your own knowledge base, automatic routing suggestions, and duplicate detection that flags a redundant ticket before it's even submitted. Sentiment detection and SLA-risk scoring highlight which open tickets need attention first.
+
+SLIDE 13  (~26.7s)
+AI Studio is where the platform adapts to you. Describe your industry once, and it proposes your own terminology throughout the app — a ticket can become a 'case', a deal can become a 'policy', whatever fits your business — plus a starter set of automation rules. Nothing is applied until you've reviewed it and clicked Apply, so you're always the one in control.
+
+SLIDE 14  (~22.7s)
+And it's not limited to one screen. A natural-language command bar turns a typed instruction into a finished record. You can ask your dashboard a plain-English question and get a real, data-grounded answer back. You can even paste in raw meeting notes and get structured contacts, leads, and next steps out the other side.
+
+SLIDE 15  (~7.1s)
+The third pillar is automation — turning repetitive manual steps into rules that run themselves.
+
+SLIDE 16  (~19.5s)
+Managers build if-this-then-that automation rules across tickets, leads, and deals with no code at all — assign, re-prioritize, send an email, or message someone on WhatsApp, automatically, the moment something happens. Every rule keeps a running log so you can see exactly what fired and when.
+
+SLIDE 17  (~19.9s)
+Any staff member can schedule a WhatsApp reminder directly from a ticket or a deal — a one-off nudge or a recurring one — sent to the customer, the assignee, or any number you choose. Set it once, and the platform handles the rest in the background.
+
+SLIDE 18  (~22.3s)
+It also connects outward — Slack and Microsoft Teams get notified the moment a ticket comes in, an SLA breaches, or a deal is won. Outgoing webhooks are cryptographically signed so your systems can verify they really came from us, and a scoped API key gives developers programmatic access when they need it.
+
+SLIDE 19  (~18.7s)
+None of this comes at the expense of security. Every organization's data is fully isolated, six-role access control governs who can see and do what, two-factor authentication and encrypted secrets protect your accounts and credentials, and a complete audit trail records every meaningful change.
+
+SLIDE 20  (~14.7s)
+Reporting rounds it out — live dashboards for pipeline, ticket volume, and SLA compliance, a short-term forecast for ticket volume, a probability-weighted revenue forecast, and one-click CSV export whenever you need the raw numbers.
+
+SLIDE 21  (~18.3s)
+And it's simple to get started. Free, Pro, and Enterprise plans all run the full platform — CRM, IT desk, and AI — with self-serve billing and plan management built right into the app, and seat-based pricing that scales as your team grows.
+
+SLIDE 22  (~15.9s)
+Stop switching between tools that don't talk to each other. CRMITdesk Evolved brings your sales team, your support team, and AI together in one place, so every conversation with a customer has the full picture behind it.
+
+SLIDE 23  (~14.3s)
+If this looks like something your team needs, reach out to us at support at quantiqsystems dot com, and we'll walk you through CRMITdesk Evolved using a use case from your own business.
+

@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"],
+  // src/sw.ts is a service worker — it runs under the "webworker" lib (self,
+  // ServiceWorkerGlobalScope, clients, ...), not "DOM" (window, document,
+  // ...) used by the rest of the app above. Type-checking it against DOM lib
+  // would fail; vite-plugin-pwa's injectManifest strategy (vite.config.ts)
+  // bundles it independently at build time anyway, so tsc never needs to
+  // see it. See tsconfig.sw.json for its own (editor-only) type-checking.
+  "exclude": ["src/sw.ts"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

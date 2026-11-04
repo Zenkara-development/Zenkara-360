@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CRM & IT Desk</title>
+
+    <!-- PWA / installable app metadata -->
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="CRMITdesk" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Nunito+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+
+    <!--
+      Theme bootstrap — must run before first paint and must stay inline
+      and blocking. ThemeContext only applies the theme in a mount effect,
+      which is after React hydrates, so without this a dark-mode user gets
+      a white flash and a Classic user gets Minimal's radii on first paint.
+      Kept in sync with ThemeContext.tsx: same three localStorage keys,
+      same allow-lists.
+    -->
+    <script>
+      (function () {
+        try {
+          var d = document.documentElement;
+          var themes = ['sky', 'minimal', 'modern', 'classic', 'friendly'];
+          var fonts = ['inter', 'jakarta', 'dm', 'nunito'];
+          var theme = localStorage.getItem('ui-theme-v2');
+          var font = localStorage.getItem('ui-font-v2');
+          d.setAttribute('data-theme', themes.indexOf(theme) > -1 ? theme : 'sky');
+          d.setAttribute('data-font', fonts.indexOf(font) > -1 ? font : 'jakarta');
+          var stored = localStorage.getItem('ui-dark');
+          var dark = stored !== null
+            ? stored === 'true'
+            : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) d.classList.add('dark');
+        } catch (e) {
+          /* Private mode / disabled storage — fall through to defaults. */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,98 @@
+# Dependencies
+node_modules/
+node_modules.*/
+.pnp
+.pnp.js
+
+# Environment — NEVER commit real secrets
+.env
+.env.local
+.env.*.local
+
+# Build output
+dist/
+build/
+.next/
+
+# Prisma generated client (regenerated from schema)
+server/node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Runtime
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Uploads (user-uploaded files)
+server/uploads/
+
+# Playwright
+test-results/
+playwright-report/
+tests/playwright-report/
+results.txt
+resultnew.txt
+result*.txt
+
+# Editor/temp backups
+*.bak
+~$*.doc*
+~$*.xls*
+~$*.ppt*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# TypeScript cache
+*.tsbuildinfo
+
+# ─── Capacitor / Android ─────────────────────────────────────────────────
+# The android/ project itself IS committed (it carries the manifest
+# permissions and network-security config), but its build output and the
+# web assets `npx cap sync` copies in are regenerated every build.
+client/android/.gradle/
+client/android/build/
+client/android/app/build/
+client/android/capacitor-cordova-android-plugins/
+client/android/local.properties
+client/android/app/src/main/assets/public/
+client/android/app/src/main/assets/capacitor.config.json
+client/android/app/src/main/assets/capacitor.plugins.json
+client/ios/App/Pods/
+client/ios/App/App/public/
+
+# Deployment tarballs built for upload
+*.tar.gz
+
+# Local Git backup
+client/.git-client-backup/
+
+# Old frontend backup
+client/_backup_pre_ui/
+
+# Local Claude configuration
+.claude/
+
+# Sensitive token screenshot
+Claude outputs/wf-admin-token.png
+
+# Environment secrets
+.env.*
+!.env.example
+!server/.env.example
+
+# Private keys
+*.pem
+*.key
