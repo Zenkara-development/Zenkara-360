@@ -22,6 +22,8 @@ import { UserSquare2, Plus, KeyRound, ShieldOff, Copy, Check, Link2, Building2, 
 import { useFormat } from '../../hooks/useFormat';
 import { useAuth } from '../../contexts/AuthContext';
 import { can } from '../../shared/permissions';
+import { useFaceReenrollmentRequests } from '../../api/faceReenrollment';
+import { FaceApprovalsTable, FaceReenrollmentReviewModal } from './FaceApprovals';
 
 /**
  * People — one screen for everyone in the organization.
@@ -351,23 +353,31 @@ const TABS = [
   { key: '', label: 'Everyone' },
   { key: 'yes', label: 'Can sign in' },
   { key: 'no', label: 'No login' },
+  { key: 'face', label: 'Face Approvals' },
 ] as const;
 
 export default function PeoplePage() {
   const { user: currentUser } = useAuth();
   const fmt = useFormat();
 
-  const [login, setLogin] = useState<'' | 'yes' | 'no'>('');
+  const [login, setLogin] = useState<'' | 'yes' | 'no' | 'face'>('');
   const [search, setSearch] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const [granting, setGranting] = useState<Person | null>(null);
   const [error, setError] = useState('');
+  const [reviewing, setReviewing] = useState<string | null>(null);
+
+  /* Face ID re-enrolment is decided by a Super Admin only — the tab is not
+     shown to anyone else, and the server refuses the requests regardless. */
+  const canReviewFaces = can.reviewFaceEnrollments(currentUser?.role);
+  const { data: faceRequests } = useFaceReenrollmentRequests(canReviewFaces);
+  const pendingFaceRequests = faceRequests?.total ?? 0;
 
   const { data, isLoading } = usePeople({
-    login: login || undefined,
-    search: search || undefined,
-    departmentId: departmentId || undefined,
+    login: login === 'face' ? undefined : login || undefined,
+    search: login === 'face' ? undefined : search || undefined,
+    departmentId: login === 'face' ? undefined : departmentId || undefined,
   });
   const { data: stats } = usePeopleStats();
   const { data: departments } = useDepartments();
@@ -381,6 +391,10 @@ export default function PeoplePage() {
   const revoke = useRevokeLogin();
   const assignRole = useAssignPersonRole();
   const repair = useRepairUnlinked();
+
+  const tabs = TABS
+    .filter(t => t.key !== 'face' || canReviewFaces)
+    .map(t => (t.key === 'face' ? { key: t.key, label: t.label, count: pendingFaceRequests } : { key: t.key, label: t.label }));
 
   return (
     <div className="flex flex-col h-full">
@@ -434,21 +448,30 @@ export default function PeoplePage() {
               aria-label="Filter by login"
               value={login}
               onChange={setLogin}
-              items={TABS.map(t => ({ key: t.key, label: t.label }))}
+              items={tabs}
             />
-            <SearchInput value={search} onChange={setSearch} placeholder="Search name, code, email…" className="sm:w-80" />
-            <Select
-              className="w-auto"
-              aria-label="Filter by department"
-              value={departmentId}
-              onChange={e => setDepartmentId(e.target.value)}
-            >
-              <option value="">All departments</option>
-              {(departments?.data ?? []).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </Select>
+            {login !== 'face' && (
+              <>
+                <SearchInput value={search} onChange={setSearch} placeholder="Search name, code, email…" className="sm:w-80" />
+                <Select
+                  className="w-auto"
+                  aria-label="Filter by department"
+                  value={departmentId}
+                  onChange={e => setDepartmentId(e.target.value)}
+                >
+                  <option value="">All departments</option>
+                  {(departments?.data ?? []).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </Select>
+              </>
+            )}
           </Toolbar>
 
-          {isLoading ? (
+          {login === 'face' ? (
+            /* The Face Approvals tab shows the Super Admin's queue of Face ID
+               re-enrolment requests — real records from the server, never
+               sample data. */
+            <FaceApprovalsTable onOpen={setReviewing} />
+          ) : isLoading ? (
             <SkeletonTable rows={6} />
           ) : !data?.data.length ? (
             <EmptyState
@@ -557,6 +580,9 @@ export default function PeoplePage() {
 
       <AddPersonModal open={addOpen} onClose={() => setAddOpen(false)} />
       <GrantLoginModal person={granting} onClose={() => setGranting(null)} />
+      {reviewing && (
+        <FaceReenrollmentReviewModal id={reviewing} onClose={() => setReviewing(null)} />
+      )}
     </div>
   );
 }

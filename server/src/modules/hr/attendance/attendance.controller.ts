@@ -447,27 +447,60 @@ export async function updatePolicy(req: AuthRequest, res: Response, next: NextFu
 const EnrolSchema = z.object({
   descriptors: z.array(DescriptorSchema).min(1).max(MAX_ENROLLMENT_SAMPLES),
   referenceSelfie: SelfieSchema.optional(),
+  /** Every captured sample image, kept so a reviewer can look at them later. */
+  sampleImages: z.array(SelfieSchema).min(1).max(MAX_ENROLLMENT_SAMPLES).optional(),
 });
 
-/** POST /hr/attendance/face/enrol — the caller enrols (or re-enrols) their own face. */
+/**
+ * POST /hr/attendance/face/enrol — the caller enrols their face for the first time.
+ *
+ * Only ever creates. Replacing an existing enrolment is a different act and
+ * a different endpoint: it needs Super Admin approval (see
+ * attendanceFace.controller.ts). Without that check the enrolment endpoint
+ * was an overwrite-in-place, which is exactly the bypass this workflow is
+ * meant to close.
+ */
 export async function enrolFace(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const { descriptors, referenceSelfie } = EnrolSchema.parse(req.body);
+    const { descriptors, referenceSelfie, sampleImages } = EnrolSchema.parse(req.body);
     descriptors.forEach(assertPlausibleDescriptor);
     const orgId = req.user!.orgId;
     const userId = req.user!.id;
-    const enrollment = await prisma.faceEnrollment.upsert({
-      where: { userId },
-      create: { orgId, userId, descriptors, samples: descriptors.length, referenceSelfie: referenceSelfie ?? null },
-      update: { descriptors, samples: descriptors.length, referenceSelfie: referenceSelfie ?? null, enrolledAt: new Date() },
-      select: { samples: true, enrolledAt: true, updatedAt: true, referenceSelfie: true },
-    });
-    logAction(userId, 'UPDATE', 'FaceEnrollment', userId, { samples: descriptors.length });
+
+    const existing = await prisma.faceEnrollment.findUnique({ where: { userId }, select: { id: true } });
+    if (existing) {
+      throw new AppError(409, 'You already have an active Face ID. Use Re-enrol — your new samples are sent to a Super Admin for approval.');
+    }
+
+    let enrollment;
+    try {
+      enrollment = await prisma.faceEnrollment.create({
+        data: {
+          orgId, userId, descriptors, samples: descriptors.length,
+          referenceSelfie: referenceSelfie ?? null,
+          ...(sampleImages ? { sampleImages: sampleImages as any } : {}),
+        },
+        select: { samples: true, enrolledAt: true, updatedAt: true, referenceSelfie: true },
+      });
+    } catch (err: any) {
+      // Two tabs enrolment at once — the unique index on userId settles it.
+      if (err?.code === 'P2002') {
+        throw new AppError(409, 'You already have an active Face ID. Use Re-enrol — your new samples are sent to a Super Admin for approval.');
+      }
+      throw err;
+    }
+    logAction(userId, 'CREATE', 'FaceEnrollment', userId, { samples: descriptors.length });
     res.json(enrollment);
   } catch (err) { next(err); }
 }
 
-/** DELETE /hr/attendance/face/me — the caller removes their own enrolment. */
+/**
+ * DELETE /hr/attendance/face/me — the caller removes their own enrolment.
+ *
+ * Org owners only (the route is gated on SUPER_ADMIN). Employees cannot
+ * delete their own Face ID: a replacement goes through the re-enrolment
+ * approval workflow instead, and nothing here may become a way around it.
+ */
 export async function deleteMyFace(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     await prisma.faceEnrollment.deleteMany({ where: { userId: req.user!.id } });
@@ -488,12 +521,39 @@ export async function listEnrollments(req: AuthRequest, res: Response, next: Nex
   } catch (err) { next(err); }
 }
 
-/** DELETE /hr/attendance/face/:userId — managers reset someone's enrolment (they enrol again next check-in). */
+/**
+ * DELETE /hr/attendance/face/:userId — an org owner resets someone's enrolment
+ * (they enrol again next check-in).
+ *
+ * Super Admin only. Managers used to be able to call this, which was a way
+ * around the re-enrolment approval policy: wiping a face is the same act as
+ * replacing one, so it now takes the same authority. Any re-enrolment
+ * request still waiting for that employee is closed out at the same time —
+ * otherwise a request raised before the reset could quietly put a face back.
+ */
 export async function deleteUserFace(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const target = await prisma.user.findFirst({ where: { id: req.params.userId, orgId: req.user!.orgId }, select: { id: true } });
     if (!target) throw new AppError(404, 'User not found');
     await prisma.faceEnrollment.deleteMany({ where: { userId: target.id } });
+    const pending = await prisma.faceReenrollmentRequest.findMany({
+      where: { orgId: req.user!.orgId, userId: target.id, status: 'PENDING' },
+      select: { id: true },
+    });
+    if (pending.length) {
+      await prisma.faceReenrollmentRequest.updateMany({
+        where: { id: { in: pending.map(p => p.id) } },
+        data: {
+          status: 'REJECTED',
+          reviewedBy: req.user!.id,
+          reviewedAt: new Date(),
+          decidedAt: new Date(),
+          rejectionReason: 'Face ID reset by an administrator.',
+          descriptors: [] as any,
+          sampleImages: [] as any,
+        },
+      });
+    }
     logAction(req.user!.id, 'DELETE', 'FaceEnrollment', target.id, { resetBy: req.user!.id });
     res.json({ ok: true });
   } catch (err) { next(err); }

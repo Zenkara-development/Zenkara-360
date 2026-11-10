@@ -112,6 +112,7 @@ model Organization {
   webForms          WebForm[]
   attendancePolicy  AttendancePolicy?
   faceEnrollments   FaceEnrollment[]
+  faceReenrollmentRequests FaceReenrollmentRequest[]
   locationPings     AttendanceLocationPing[]
   salaryComponents  SalaryComponent[]
   payrollCycles     PayrollCycle[]
@@ -323,6 +324,8 @@ model User {
   chatParticipants ChatParticipant[]
   chatMessages     ChatMessage[]
   faceEnrollment    FaceEnrollment?
+  faceReenrollmentRequests   FaceReenrollmentRequest[]
+  faceReenrollmentsReviewed  FaceReenrollmentRequest[] @relation("FaceReenrollmentReviewer")
   locationPings     AttendanceLocationPing[]
   employeeSalaries  EmployeeSalary[]
   leaveBalanceAdjustments LeaveBalanceAdjustment[]
@@ -1792,6 +1795,11 @@ model FaceEnrollment {
   samples     Int          @default(0)
   /// Small JPEG data URL of one enrolment selfie, shown back to the user/manager as "this is what's enrolled".
   referenceSelfie String?  @map("reference_selfie")
+  /// Every enrolment sample image that was kept, as JPEG data URLs. Null for
+  /// enrolments created before this column existed (only the single reference
+  /// selfie was stored back then) — the UI says so honestly rather than
+  /// pretending a full set exists.
+  sampleImages Json?       @map("sample_images")
   enrolledAt  DateTime     @default(now()) @map("enrolled_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
   org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -1799,6 +1807,49 @@ model FaceEnrollment {
 
   @@index([orgId])
   @@map("face_enrollments")
+}
+
+// A request to replace an employee's active Face ID.
+//
+// The active enrolment (FaceEnrollment) is NEVER touched by a pending
+// request — the old face keeps working for attendance while the request waits,
+// and the new samples live here, separately, until a Super Admin decides.
+// Keeping the two apart is the whole point: a request is a *decision*, an
+// enrolment is the *effective state*.
+//
+// Biometric payload (descriptors + sampleImages) is written once at
+// submission and purged when the request is rejected; on approval it is
+// handed over to the new FaceEnrollment, which becomes the single source of
+// truth for the employee's live face data.
+model FaceReenrollmentRequest {
+  id       String @id @default(cuid())
+  orgId    String @map("org_id")
+  userId   String @map("user_id")
+  /// PENDING | APPROVED | REJECTED
+  status   String @default("PENDING")
+  /// number[][] — the submitted 128-dim descriptors, NOT active until approved.
+  descriptors Json
+  /// string[] — every submitted sample image as a JPEG data URL, so the
+  /// reviewer can actually look at what was captured (descriptors alone
+  /// can't be compared by eye).
+  sampleImages Json @map("sample_images")
+  samples      Int     @default(0)
+  /// First submitted image, kept in step with FaceEnrollment.referenceSelfie.
+  referenceSelfie String? @map("reference_selfie")
+  rejectionReason String? @map("rejection_reason")
+  reviewedBy     String?   @map("reviewed_by")
+  reviewedAt     DateTime? @map("reviewed_at")
+  decidedAt      DateTime? @map("decided_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User?        @relation("FaceReenrollmentReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([orgId, status])
+  @@index([userId, status])
+  @@map("face_reenrollment_requests")
 }
 
 // ─── HR: Leave Management ───────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
+import { useAuth } from '../../contexts/AuthContext';
+import { can } from '../../shared/permissions';
 import {
   PageHeader, PageBody, Card, CardHeader, Button, Modal, Badge, EmptyState, Tabs,
   RowActions, Field, Input, Checkbox, Alert, SkeletonTable, Toggle,
@@ -467,6 +469,11 @@ interface FaceEnrollmentRow { userId: string; samples: number; enrolledAt: strin
 
 function FaceVerificationSection() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  /* Resetting someone's Face ID is a Super Admin action — the same authority
+     that approves a re-enrolment. Managers can see who is enrolled, but they
+     cannot wipe a face around the approval workflow. */
+  const canResetFaces = can.reviewFaceEnrollments(user?.role);
   const { data: policy } = useQuery<AttendancePolicy>({
     queryKey: ['attendance-policy'],
     queryFn: () => api.get('/hr/attendance/policy').then(r => r.data),
@@ -547,7 +554,7 @@ function FaceVerificationSection() {
           </div>
         )}
         {policy?.faceVerificationRequired && (
-          <p className="text-[12px] text-fg-muted">Face verification: employees enrol once from the Attendance page (3 webcam samples). Only a numeric face signature is stored — not photos — and anyone can remove theirs; you can reset it below.</p>
+          <p className="text-[12px] text-fg-muted">Face verification: employees enrol once from the Attendance page (3 webcam samples). Only a numeric face signature is stored — not photos. Replacing an enrolled face is an approval workflow: the employee requests it and a Super Admin approves or rejects it, and their current Face ID keeps working until then.</p>
         )}
         {policy?.faceVerificationRequired && (
           <>
@@ -580,9 +587,13 @@ function FaceVerificationSection() {
                         <p className="text-[13px] text-fg truncate">{e.user.name} <span className="text-fg-subtle">· {e.user.email}</span></p>
                         <p className="text-[11.5px] text-fg-subtle">{e.samples} samples · enrolled {new Date(e.enrolledAt).toLocaleDateString()}</p>
                       </div>
-                      <Button size="xs" variant="ghost" icon={<Trash2 size={12} />} loading={reset.isPending && reset.variables === e.userId} onClick={() => reset.mutate(e.userId)}>
-                        Reset
-                      </Button>
+                      {canResetFaces ? (
+                        <Button size="xs" variant="ghost" icon={<Trash2 size={12} />} loading={reset.isPending && reset.variables === e.userId} onClick={() => reset.mutate(e.userId)}>
+                          Reset
+                        </Button>
+                      ) : (
+                        <span className="text-[11.5px] text-fg-subtle text-right">Reset is a Super Admin action</span>
+                      )}
                     </li>
                   ))}
                 </ul>

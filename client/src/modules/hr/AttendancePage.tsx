@@ -4,14 +4,15 @@ import { api } from '../../api/client';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   PageHeader, PageBody, Card, CardHeader, Tabs, Button, Badge, Alert, Avatar,
-  DataTable, EmptyState, PastelStatCard,
+  DataTable, EmptyState, PastelStatCard, InlineSpinner,
 } from '../../shared/components';
 import {
-  LogIn, LogOut, MapPin, Users, Clock, ScanFace, Trash2,
+  LogIn, LogOut, MapPin, Users, Clock, ScanFace,
   CalendarDays, UserCheck, UserX, Plane, ClipboardCheck,
 } from 'lucide-react';
 import { useFormat } from '../../hooks/useFormat';
 import { FaceCaptureModal, type FaceSample } from '../../shared/components/FaceCaptureModal';
+import { useMyFaceState, useSubmitFaceReenrollment, type EffectiveFaceStatus } from '../../api/faceReenrollment';
 import { RegisterSection } from './attendance/RegisterSection';
 const LiveMap = lazy(() => import('./LiveMap').then(m => ({ default: m.LiveMap })));
 
@@ -182,8 +183,15 @@ function CheckInWidget() {
   async function onFaceCaptured(samples: FaceSample[]) {
     if (!face) return;
     if (face.mode === 'enrol') {
-      await api.post('/hr/attendance/face/enrol', { descriptors: samples.map(s => s.descriptor), referenceSelfie: samples[0]?.selfie });
+      await api.post('/hr/attendance/face/enrol', {
+        descriptors: samples.map(s => s.descriptor),
+        referenceSelfie: samples[0]?.selfie,
+        // Keep every sample image, so a later Face ID review can show the
+        // actual pictures and not just one thumbnail.
+        sampleImages: samples.map(s => s.selfie).filter(Boolean),
+      });
       qc.invalidateQueries({ queryKey: ['attendance-policy'] });
+      qc.invalidateQueries({ queryKey: ['face-state'] });
     }
     // Straight on to the actual check-in/out with the last sample so the user isn't asked twice
     const last = samples[samples.length - 1];
@@ -275,53 +283,166 @@ function CheckInWidget() {
   );
 }
 
-/** Self-service view of the user's enrolled face — re-enrol or remove. Shown only when the org requires face verification. */
+/**
+ * Self-service view of the user's Face ID.
+ *
+ * An employee may enrol their face for the first time, and they may *ask* to
+ * replace it — but they can never remove or overwrite it themselves. A
+ * replacement becomes a request that a Super Admin approves or rejects, and
+ * the employee's current Face ID keeps working the whole time it waits.
+ *
+ * There is deliberately no Remove button here: deleting a Face ID is not a
+ * self-service act.
+ */
 function FaceIdCard() {
   const qc = useQueryClient();
   const { data: policy } = useAttendancePolicy();
-  const { date } = useFormat();
-  const [mode, setMode] = useState<'enrol' | null>(null);
+  const { data: face, isLoading, error, refetch } = useMyFaceState(!!policy?.faceVerificationRequired);
+  const { date, dateTime } = useFormat();
+  const [mode, setMode] = useState<'enrol' | 'reenrol' | null>(null);
   const [busy, setBusy] = useState(false);
-  if (!policy?.faceVerificationRequired) return null;
-  const e = policy.myEnrollment;
+  const [formError, setFormError] = useState('');
+  const [dismissed, setDismissed] = useState<string>('');
+  const submitReenrollment = useSubmitFaceReenrollment();
 
+  if (!policy?.faceVerificationRequired) return null;
+
+  const enrollment = face?.enrollment ?? null;
+  const request = face?.reEnrollment ?? null;
+  const pending = request?.status === 'PENDING';
+  const status: EffectiveFaceStatus = face?.effectiveStatus ?? (enrollment ? 'VERIFIED' : 'NOT_ENROLLED');
+  const decided = request && request.status !== 'PENDING' && request.id !== dismissed ? request : null;
+
+  /** First-time enrolment — the original, unchanged flow. */
   async function enrol(samples: FaceSample[]) {
-    await api.post('/hr/attendance/face/enrol', { descriptors: samples.map(s => s.descriptor), referenceSelfie: samples[0]?.selfie });
+    setFormError('');
+    await api.post('/hr/attendance/face/enrol', {
+      descriptors: samples.map(s => s.descriptor),
+      referenceSelfie: samples[0]?.selfie,
+      sampleImages: samples.map(s => s.selfie).filter(Boolean),
+    });
     qc.invalidateQueries({ queryKey: ['attendance-policy'] });
+    qc.invalidateQueries({ queryKey: ['face-state'] });
   }
-  async function remove() {
+
+  /** Replacement — becomes a request for a Super Admin, nothing more. */
+  async function reenrol(samples: FaceSample[]) {
+    setFormError('');
     setBusy(true);
-    try { await api.delete('/hr/attendance/face/me'); qc.invalidateQueries({ queryKey: ['attendance-policy'] }); } finally { setBusy(false); }
+    try {
+      await submitReenrollment.mutateAsync({
+        descriptors: samples.map(s => s.descriptor),
+        sampleImages: samples.map(s => s.selfie).filter(Boolean),
+      });
+    } catch (err: any) {
+      setFormError(err?.response?.data?.error || err?.message || 'Could not send your new Face ID for approval.');
+      throw err; // the modal shows the reason too
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <Card>
       <CardHeader title="Face ID" subtitle="Used to confirm it's you at check-in." />
       <div className="flex items-center gap-4 mt-3 flex-wrap">
-        {e?.referenceSelfie ? (
-          <img src={e.referenceSelfie} alt="Enrolled face" className="w-16 h-16 rounded-lg object-cover -scale-x-100 border border-line" />
+        {enrollment?.referenceSelfie ? (
+          <img src={enrollment.referenceSelfie} alt="Enrolled face" className="w-16 h-16 rounded-lg object-cover -scale-x-100 border border-line" />
         ) : (
           <div className="w-16 h-16 rounded-lg bg-surface-sunken border border-line flex items-center justify-center text-fg-subtle"><ScanFace size={22} /></div>
         )}
         <div className="flex-1 min-w-[180px]">
-          {e ? (
+          {enrollment ? (
             <>
-              <p className="text-[13px] font-medium text-fg flex items-center gap-2">Enrolled <Badge variant="green">{e.samples} samples</Badge></p>
-              <p className="text-[12px] text-fg-muted">Since {date(e.enrolledAt)}. Only a numeric signature is stored — you can remove it any time.</p>
+              <p className="text-[13px] font-medium text-fg flex items-center gap-2">
+                Face ID enrolled
+                {status === 'PENDING_VERIFICATION'
+                  ? <Badge variant="yellow" dot>Pending Verification</Badge>
+                  : <Badge variant="green" dot>Verified</Badge>}
+                <Badge variant="gray">{enrollment.samples} samples</Badge>
+              </p>
+              <p className="text-[12px] text-fg-muted">
+                Since {date(enrollment.enrolledAt)}. Only a numeric signature is stored for matching.
+              </p>
             </>
           ) : (
             <>
-              <p className="text-[13px] font-medium text-fg">Not enrolled yet</p>
+              <p className="text-[13px] font-medium text-fg flex items-center gap-2">
+                Not enrolled yet <Badge variant="gray">Not enrolled</Badge>
+              </p>
               <p className="text-[12px] text-fg-muted">You'll be asked to enrol the first time you check in, or do it now.</p>
             </>
           )}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="secondary" icon={<ScanFace size={14} />} onClick={() => setMode('enrol')}>{e ? 'Re-enrol' : 'Enrol now'}</Button>
-          {e && <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} loading={busy} onClick={remove}>Remove</Button>}
+          {/* While a request is waiting there is nothing to click — the Re-enrol
+              button disappears so a second request cannot be raised by accident. */}
+          {!pending && (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<ScanFace size={14} />}
+              loading={busy}
+              onClick={() => { setFormError(''); setMode(enrollment ? 'reenrol' : 'enrol'); }}
+            >
+              {enrollment ? 'Re-enrol' : 'Enrol now'}
+            </Button>
+          )}
         </div>
       </div>
-      {mode && <FaceCaptureModal open mode="enrol" onClose={() => setMode(null)} onCaptured={enrol} />}
+
+      {isLoading && (
+        <p className="text-[12px] text-fg-subtle mt-3 flex items-center gap-2">
+          <InlineSpinner /> Loading your Face ID status…
+        </p>
+      )}
+
+      {error && (
+        <Alert tone="danger" className="mt-3" actions={<Button size="sm" variant="secondary" onClick={() => refetch()}>Retry</Button>}>
+          Could not load your Face ID status.
+        </Alert>
+      )}
+
+      {formError && <Alert tone="danger" className="mt-3">{formError}</Alert>}
+
+      {pending && (
+        <Alert tone="warning" title="Pending Verification" className="mt-3">
+          Your new Face ID was submitted on {dateTime(request!.submittedAt)} and is waiting for a Super Admin to
+          approve it. Your current Face ID is still active and still works at check-in.
+        </Alert>
+      )}
+
+      {decided?.status === 'APPROVED' && (
+        <Alert
+          tone="success"
+          title="Face ID re-enrolment approved"
+          className="mt-3"
+          onDismiss={() => setDismissed(decided.id)}
+        >
+          Your new Face ID is now your active Face ID and is ready to use at check-in.
+        </Alert>
+      )}
+
+      {decided?.status === 'REJECTED' && (
+        <Alert
+          tone="danger"
+          title="Face ID re-enrolment rejected"
+          className="mt-3"
+          onDismiss={() => setDismissed(decided.id)}
+        >
+          <p>Your current Face ID is unchanged and still active.</p>
+          {decided.rejectionReason && <p className="mt-1">Reason: {decided.rejectionReason}</p>}
+        </Alert>
+      )}
+
+      {mode && (
+        <FaceCaptureModal
+          open
+          mode={mode}
+          onClose={() => setMode(null)}
+          onCaptured={mode === 'enrol' ? enrol : reenrol}
+        />
+      )}
     </Card>
   );
 }

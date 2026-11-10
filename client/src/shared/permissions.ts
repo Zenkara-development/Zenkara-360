@@ -82,6 +82,9 @@ export const can = {
   approveLeave:       (r?: string | null) => inGroup(r, MANAGERS),         // /hr/leave/requests/:id/approve|reject
   manageOrgStructure: (r?: string | null) => inGroup(r, MANAGERS),         // POST/PATCH /hr/org/*
   managePeople:       (r?: string | null) => inGroup(r, MANAGERS),         // POST /people, grant/revoke login
+  /** Reviewing and deciding Face ID re-enrolment requests. Org owners only —
+   *  the server gates /hr/attendance/face/reenroll/requests on SUPER_ADMIN. */
+  reviewFaceEnrollments: (r?: string | null) => inGroup(r, ADMIN),
 
   /* ── Admin / platform config ── */
   readAdmin:          (r?: string | null) => inGroup(r, MANAGERS),         // /admin/users, /audit-logs, /jobs, /permissions/*

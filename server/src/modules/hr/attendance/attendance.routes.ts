@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { authenticate, requireRole, ALL_USERS, MANAGERS } from '../../../middleware/authenticate';
+import { authenticate, requireRole, ALL_USERS, MANAGERS, ADMIN } from '../../../middleware/authenticate';
 import * as c from './attendance.controller';
 import * as a from './attendanceAdmin.controller';
+import * as f from './attendanceFace.controller';
 
 const router = Router();
 router.use(authenticate);
@@ -17,9 +18,22 @@ router.post('/heartbeat', requireRole(...ALL_USERS), c.heartbeat);
 router.get('/policy',            requireRole(...ALL_USERS), c.getPolicy);
 router.patch('/policy',          requireRole(...MANAGERS),  c.updatePolicy);
 router.post('/face/enrol',       requireRole(...ALL_USERS), c.enrolFace);
-router.delete('/face/me',        requireRole(...ALL_USERS), c.deleteMyFace);
+// Removing a Face ID is a Super Admin action — an employee may not delete
+// their own, and a manager may not reset someone else's around the
+// re-enrolment approval policy.
+router.delete('/face/me',        requireRole(...ADMIN),    c.deleteMyFace);
 router.get('/face',              requireRole(...MANAGERS),  c.listEnrollments);
-router.delete('/face/:userId',   requireRole(...MANAGERS),  c.deleteUserFace);
+router.delete('/face/:userId',   requireRole(...ADMIN),    c.deleteUserFace);
+
+// Face ID re-enrolment — the employee asks, a Super Admin decides.
+// The employee's own status and submission are open to every staff role;
+// reviewing, approving and rejecting are Super Admin only.
+router.get('/face/reenroll/me',                    requireRole(...ALL_USERS), f.myReenrollment);
+router.post('/face/reenroll',                      requireRole(...ALL_USERS), f.submitReenrollment);
+router.get('/face/reenroll/requests',              requireRole(...ADMIN),    f.listReenrollmentRequests);
+router.get('/face/reenroll/requests/:id',          requireRole(...ADMIN),    f.getReenrollmentRequest);
+router.post('/face/reenroll/requests/:id/approve', requireRole(...ADMIN),    f.approveReenrollment);
+router.post('/face/reenroll/requests/:id/reject',  requireRole(...ADMIN),    f.rejectReenrollment);
 
 // Policy engine: groups, holidays, register, corrections (see attendanceAdmin.controller.ts)
 router.get('/policy-groups',          requireRole(...MANAGERS),  a.listGroups);
