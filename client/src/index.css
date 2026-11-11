@@ -1544,3 +1544,34 @@ html.dark .skeleton {
   .robot-face__head, .robot-face__cap, .robot-face__eye { animation: none !important; }
   .robot-launcher, .robot-bubble { transition: none; }
 }
+
+/* ─── Leaflet maps stay inside their card ────────────────────────────────────
+ *
+ * Leaflet positions its panes absolutely with z-index 200–700, and the map
+ * container itself is `position: relative` with no z-index — so it creates no
+ * stacking context. The panes therefore compete with the whole page, and a
+ * map's shapes paint over modals (z-50), sticky headers and dropdowns. On
+ * the office list, the little boundary preview floated on top of the
+ * "Add office location" dialog and covered its own fields.
+ *
+ * Two changes fix it:
+ *
+ *   1. `isolation: isolate` on the container makes it a stacking context, so
+ *      every pane inside is resolved against the map rather than the page.
+ *   2. Every pane is dropped to z-index 0. Leaflet's own DOM order is
+ *      tiles → overlay → shadow → markers → tooltips → popups, which is the
+ *      order it wants them stacked in, so the map still draws exactly as
+ *      before — the tiles, the boundary and the markers all keep their
+ *      relative order — while the map as a whole sits at the page's level.
+ *
+ * The doubled class on the pane selector is deliberate: leaflet.css is
+ * imported by the map components, so it can land after this file in the
+ * bundle, and a single class would not be enough to win.
+ */
+.leaflet-container {
+  z-index: 0;
+  isolation: isolate;
+}
+.leaflet-container.leaflet-container .leaflet-pane {
+  z-index: 0;
+}
