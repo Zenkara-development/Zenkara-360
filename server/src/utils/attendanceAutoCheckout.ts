@@ -15,12 +15,28 @@
 
 import { prisma } from './prisma';
 import { verifyAgainstOffices } from './attendanceVerification';
+import { recordTransition, isUsableAccuracy } from './attendanceGeofenceEvents';
 import { sseManager, SSEEvent } from './sse';
 import { logAction } from './auditLog';
 import { sendPushToUser } from './webPush';
 
 /** GPS fixes looser than this are ignored for the geofence decision. */
 export const MAX_USABLE_ACCURACY_M = 250;
+
+/**
+ * Does this org collect location at all?
+ *
+ * Entry/exit events are only recorded when the org has actually opted into
+ * location tracking. Without that opt-in, a stray heartbeat must not leave
+ * a trail of an employee's movements.
+ */
+export function locationTrackingEnabled(policy: {
+  shareLiveLocation: boolean;
+  autoCheckoutOnLeave: boolean;
+  heartbeatTimeoutMinutes: number;
+}): boolean {
+  return policy.shareLiveLocation || policy.autoCheckoutOnLeave || policy.heartbeatTimeoutMinutes > 0;
+}
 
 export type AutoSource = 'AUTO_GEOFENCE' | 'AUTO_TIMEOUT';
 
@@ -64,7 +80,7 @@ export async function recordHeartbeat(orgId: string, userId: string, lat: number
     prisma.officeLocation.findMany({ where: { orgId, isActive: true } }),
   ]);
 
-  const usable = offices.length > 0 && (accuracy == null || accuracy <= MAX_USABLE_ACCURACY_M);
+  const usable = offices.length > 0 && isUsableAccuracy(accuracy);
   const geo = usable ? verifyAgainstOffices(offices, lat, lng, '') : null;
   const inside: boolean | null = geo ? geo.locationOk : null;
 
@@ -79,6 +95,19 @@ export async function recordHeartbeat(orgId: string, userId: string, lat: number
   if (policy.shareLiveLocation) {
     await prisma.attendanceLocationPing.create({ data: { orgId, userId, recordId: session.id, at: now, lat, lng, accuracy: accuracy ?? null, inside } });
     sseManager.broadcastAll(orgId, SSEEvent.ATTENDANCE_UPDATED, { userId, type: 'location' });
+  }
+
+  // Record the crossing, if this fix actually crossed a boundary. Ten fixes
+  // in a row from the same side produce one event, not ten — the transition
+  // rule lives in attendanceGeofenceEvents.ts.
+  if (inside !== null && locationTrackingEnabled(policy)) {
+    await recordTransition({
+      orgId, userId, recordId: session.id,
+      officeLocationId: geo?.matchedLocationId ?? null,
+      officeName: geo?.matchedLocationName ?? null,
+      inside, lat, lng, accuracy: accuracy ?? null,
+      source: 'HEARTBEAT', at: now,
+    });
   }
 
   const graceMs = policy.autoCheckoutAfterMinutes * 60_000;

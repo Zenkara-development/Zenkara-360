@@ -213,7 +213,11 @@ test('nothing reads the S3 env vars directly any more', () => {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) { walk(full); continue; }
       if (!entry.name.endsWith('.ts')) continue;
-      if (full.endsWith('utils/platformSettings.ts')) continue;
+      // path.join() uses the platform separator, so the exemption has to be
+      // built the same way — a literal 'utils/platformSettings.ts' never
+      // matches a Windows path, and the one permitted reader was being
+      // reported as an offender.
+      if (path.join('utils', 'platformSettings.ts') === path.relative(SRC, full)) continue;
       if (/process\.env\.S3_/.test(code(full))) offenders.push(path.relative(SRC, full));
     }
   };

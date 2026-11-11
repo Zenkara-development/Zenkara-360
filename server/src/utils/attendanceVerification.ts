@@ -12,6 +12,7 @@
 // perfectly handle.
 
 import { promises as dns } from 'node:dns';
+import { parsePolygon, pointInPolygon, distanceToPolygonMeters, MIN_POLYGON_POINTS, type LatLng } from './geoPolygon';
 
 /** Great-circle distance between two lat/lng points, in meters. */
 export function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -202,28 +203,94 @@ export interface VerificationResult {
   passed: boolean;
   /** Name of the office location matched (closest one that passed, or the closest overall if none passed). */
   matchedLocationName: string | null;
+  /** Id of the matched office location, when the caller supplied ids. */
+  matchedLocationId: string | null;
   nearestDistanceMeters: number | null;
+}
+
+/**
+ * An office's geofence, in either of the two shapes the product supports.
+ *
+ * CIRCLE (the original, and still the default) is a centre plus a radius in
+ * metres. POLYGON is a GeoJSON boundary — see utils/geoPolygon.ts for the
+ * coordinate format. An office whose stored polygon can't be parsed falls
+ * back to its circle, so a corrupt row can never lock an office out of
+ * attendance entirely.
+ */
+export interface OfficeGeofence {
+  id?: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  allowedIps?: string | null;
+  geofenceType?: string | null;
+  polygon?: unknown;
+}
+
+/** True when this office draws a polygon boundary rather than a circle. */
+export function isPolygonOffice(office: OfficeGeofence): boolean {
+  return (office.geofenceType || 'CIRCLE').toUpperCase() === 'POLYGON';
+}
+
+/**
+ * Is a point inside this office's geofence?
+ *
+ * For a polygon: a point-in-polygon test against the stored boundary, with
+ * points on the boundary counting as inside.
+ *
+ * For a circle: unchanged from the original implementation — the distance
+ * from the centre must be within `radiusMeters`.
+ */
+export function isInsideOffice(office: OfficeGeofence, point: LatLng): boolean {
+  if (isPolygonOffice(office)) {
+    const ring = parsePolygon(office.polygon);
+    if (ring && ring.length >= MIN_POLYGON_POINTS) return pointInPolygon(point, ring);
+    // A polygon office with an unreadable boundary falls back to its circle
+    // rather than silently matching nothing.
+  }
+  return distanceMeters(point.lat, point.lng, office.latitude, office.longitude) <= office.radiusMeters;
+}
+
+/**
+ * How far outside the office is this point?
+ *
+ * For a circle this is the distance to the CENTRE (the original behaviour —
+ * the "X m from the office" figure in the UI has always been centre-based,
+ * and changing it would make every existing number move). For a polygon it
+ * is the distance to the nearest EDGE, because that is the number that
+ * actually tells someone standing outside the fence how far they are from it.
+ */
+export function distanceFromOffice(office: OfficeGeofence, point: LatLng): number {
+  if (isPolygonOffice(office)) {
+    const ring = parsePolygon(office.polygon);
+    if (ring && ring.length >= MIN_POLYGON_POINTS) {
+      return pointInPolygon(point, ring) ? 0 : distanceToPolygonMeters(point, ring);
+    }
+  }
+  return distanceMeters(point.lat, point.lng, office.latitude, office.longitude);
 }
 
 /** Checks (lat,lng,ip) against every active OfficeLocation for the org and returns the best match. */
 export function verifyAgainstOffices(
-  offices: { name: string; latitude: number; longitude: number; radiusMeters: number; allowedIps: string | null }[],
+  offices: OfficeGeofence[],
   lat: number,
   lng: number,
   ip: string,
 ): VerificationResult {
   if (offices.length === 0) {
-    return { locationOk: false, networkOk: false, networkStatus: 'not_configured', passed: false, matchedLocationName: null, nearestDistanceMeters: null };
+    return { locationOk: false, networkOk: false, networkStatus: 'not_configured', passed: false, matchedLocationName: null, matchedLocationId: null, nearestDistanceMeters: null };
   }
 
+  const point: LatLng = { lat, lng };
   let best: VerificationResult & { distance: number } = {
     locationOk: false, networkOk: false, networkStatus: 'not_configured', passed: false,
-    matchedLocationName: null, nearestDistanceMeters: null, distance: Infinity,
+    matchedLocationName: null, matchedLocationId: null, nearestDistanceMeters: null, distance: Infinity,
   };
 
   for (const office of offices) {
-    const distance = distanceMeters(lat, lng, office.latitude, office.longitude);
-    const locationOk = distance <= office.radiusMeters;
+    const locationOk = isInsideOffice(office, point);
+    const distance = distanceFromOffice(office, point);
     const networkStatus = checkNetworkAllowlist(ip, office.allowedIps);
     const networkOk = networkStatus !== 'not_matched';
     // "Require what's configured": no IP allowlist on this office means GPS
@@ -237,7 +304,7 @@ export function verifyAgainstOffices(
       : locationOk && networkStatus === 'matched';
 
     if ((passed && !best.passed) || (!best.passed && distance < best.distance)) {
-      best = { locationOk, networkOk, networkStatus, passed, matchedLocationName: office.name, nearestDistanceMeters: Math.round(distance), distance };
+      best = { locationOk, networkOk, networkStatus, passed, matchedLocationName: office.name, matchedLocationId: office.id ?? null, nearestDistanceMeters: Math.round(distance), distance };
     }
   }
 
@@ -253,7 +320,7 @@ export function verifyAgainstOffices(
  * and for callers that already hold literal allowlists.
  */
 export async function verifyAgainstOfficesResolved(
-  offices: { name: string; latitude: number; longitude: number; radiusMeters: number; allowedIps: string | null }[],
+  offices: OfficeGeofence[],
   lat: number,
   lng: number,
   ip: string,

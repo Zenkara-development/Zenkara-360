@@ -113,6 +113,7 @@ model Organization {
   attendancePolicy  AttendancePolicy?
   faceEnrollments   FaceEnrollment[]
   faceReenrollmentRequests FaceReenrollmentRequest[]
+  attendanceGeofenceEvents AttendanceGeofenceEvent[]
   locationPings     AttendanceLocationPing[]
   salaryComponents  SalaryComponent[]
   payrollCycles     PayrollCycle[]
@@ -302,6 +303,7 @@ model User {
   org                    Organization?      @relation(fields: [orgId], references: [id])
   storageConfigsConnected StorageConfig[]
   attendanceRecords      AttendanceRecord[]
+  attendanceGeofenceEvents AttendanceGeofenceEvent[]
   leaveRequests          LeaveRequest[]     @relation("LeaveRequester")
   leaveRequestsDecided   LeaveRequest[]     @relation("LeaveDecider")
   invoicesCreated        Invoice[]          @relation("InvoiceCreator")
@@ -1627,6 +1629,12 @@ model QuoteLine {
 // the employee is within `radiusMeters` of at least one active location AND
 // (unless skipped) their request's public IP matches `allowedIps`. Multiple
 // rows support multi-branch orgs; a single-office org just has one.
+//
+// A location can also be a POLYGON, for offices whose footprint isn't a
+// circle (a campus, a building with an L-shape, a car park along a road).
+// CIRCLE remains the default and every existing row keeps working exactly
+// as before — `latitude`/`longitude`/`radiusMeters` are still the whole
+// story for a circular office.
 model OfficeLocation {
   id            String       @id @default(cuid())
   orgId         String       @map("org_id")
@@ -1643,13 +1651,70 @@ model OfficeLocation {
   /// Optional roll-up to the HR/asset Location concept. Null keeps the
   /// pre-existing standalone geo-fence behaviour untouched.
   locationId    String?      @map("location_id")
+  /// CIRCLE | POLYGON. CIRCLE uses latitude/longitude/radiusMeters;
+  /// POLYGON uses `polygon`.
+  geofenceType  String       @default("CIRCLE") @map("geofence_type")
+  /// The office boundary as a GeoJSON Polygon (RFC 7946): longitude first,
+  /// ring closed — see utils/geoPolygon.ts for the full format. Null for a
+  /// circular office.
+  polygon       Json?        @map("polygon")
+  /// Cached area of the polygon in square metres, so the admin UI and the
+  /// live map don't have to recompute it on every read.
+  areaSquareMeters Float?    @map("area_square_meters")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
   org           Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   location      Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  geofenceEvents AttendanceGeofenceEvent[]
 
   @@index([orgId])
   @@map("office_locations")
+}
+
+// A geofence entry or exit — the moment an employee's GPS fix said they
+// crossed an office boundary.
+//
+// This is deliberately NOT a row per GPS ping: AttendanceLocationPing
+// already stores those, and it is purged on a short retention window. This
+// table stores only *transitions* (inside → outside, outside → inside), so
+// it stays small, it is the thing an admin reviews when someone says "I was
+// at the office but the system says I wasn't", and it survives the ping
+// purge.
+//
+// Duplicates are prevented twice over: the writer only records a transition
+// (a state that differs from the person's last recorded event), and the
+// unique index on (userId, seq) makes a concurrent double-write impossible
+// at the database level.
+model AttendanceGeofenceEvent {
+  id               String    @id @default(cuid())
+  orgId            String    @map("org_id")
+  userId           String    @map("user_id")
+  /// The attendance session this happened during, when there was one.
+  recordId         String?   @map("record_id")
+  officeLocationId String?   @map("office_location_id")
+  officeName       String?   @map("office_name")
+  /// ENTER | EXIT
+  eventType        String    @map("event_type")
+  at               DateTime  @default(now())
+  lat              Float
+  lng              Float
+  /// The GPS accuracy of the fix that triggered it, in metres.
+  accuracy         Float?
+  /// HEARTBEAT | CHECK_IN | CHECK_OUT | STATUS_CHECK
+  source           String    @default("HEARTBEAT")
+  /// Per-employee ordering. Unique, so two writers can never record the
+  /// same transition twice.
+  seq              Int
+  org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  record           AttendanceRecord? @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  officeLocation   OfficeLocation?   @relation(fields: [officeLocationId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, seq])
+  @@index([orgId, userId, at])
+  @@index([orgId, officeLocationId, at])
+  @@index([recordId, at])
+  @@map("attendance_geofence_events")
 }
 
 // One row per check-in/check-out SESSION, not per day — an employee can
@@ -1714,6 +1779,7 @@ model AttendanceRecord {
   user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   locationPings         AttendanceLocationPing[]
+  geofenceEvents        AttendanceGeofenceEvent[]
 
   @@index([userId, date])
   @@index([orgId, date])

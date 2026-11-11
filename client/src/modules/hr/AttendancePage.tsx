@@ -8,11 +8,13 @@ import {
 } from '../../shared/components';
 import {
   LogIn, LogOut, MapPin, Users, Clock, ScanFace,
-  CalendarDays, UserCheck, UserX, Plane, ClipboardCheck,
+  CalendarDays, UserCheck, UserX, Plane, ClipboardCheck, LocateFixed,
 } from 'lucide-react';
 import { useFormat } from '../../hooks/useFormat';
 import { FaceCaptureModal, type FaceSample } from '../../shared/components/FaceCaptureModal';
 import { useMyFaceState, useSubmitFaceReenrollment, type EffectiveFaceStatus } from '../../api/faceReenrollment';
+import { useMyLocation, useReportMyLocation } from '../../api/attendanceGeofence';
+import { formatDistance } from '../../shared/geo';
 import { RegisterSection } from './attendance/RegisterSection';
 const LiveMap = lazy(() => import('./LiveMap').then(m => ({ default: m.LiveMap })));
 
@@ -279,6 +281,105 @@ function CheckInWidget() {
             : undefined}
         />
       )}
+    </Card>
+  );
+}
+
+/**
+ * Where am I right now, according to the office geofences?
+ *
+ * The verdict comes from the SERVER, never from the browser: the client
+ * sends the GPS fix it obtained and the server runs the same point-in-polygon
+ * (or distance-from-centre) check the check-in will use, so what the
+ * employee is told and what they are judged by cannot disagree.
+ *
+ * Nothing here asks for the GPS on its own — the card reads the last
+ * position the server already had, and only asks the browser for a fix when
+ * the employee presses "Update my location".
+ */
+function MyOfficeStatusCard() {
+  const { dateTime } = useFormat();
+  const { data: location, isLoading } = useMyLocation();
+  const report = useReportMyLocation();
+  const [error, setError] = useState('');
+
+  if (!location?.officeCount) return null;
+
+  async function update() {
+    setError('');
+    if (!navigator.geolocation) { setError('This device has no location service.'); return; }
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15_000 }));
+      await report.mutateAsync({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      });
+    } catch (err: any) {
+      if (err?.code === err.PERMISSION_DENIED) {
+        setError('Location permission was denied — allow it to see whether you are at the office.');
+      } else if (err?.code === err.POSITION_UNAVAILABLE) {
+        setError('No location fix is available right now.');
+      } else {
+        setError(err?.response?.data?.error || 'Could not update your location.');
+      }
+    }
+  }
+
+  const inside = location.inside === true;
+  const unknown = location.inside === null;
+  const lastEvent = location.lastEvent;
+
+  return (
+    <Card data-testid="my-office-status">
+      <CardHeader
+        title="My office status"
+        subtitle="Where the geofence thinks you are right now."
+        actions={<Button size="sm" variant="secondary" icon={<LocateFixed size={13} />} loading={report.isPending} onClick={update}>Update my location</Button>}
+      />
+      <div className="mt-3 space-y-2">
+        {error && <Alert tone="warning">{error}</Alert>}
+        {isLoading ? (
+          <p className="text-[12.5px] text-fg-subtle">Checking your location…</p>
+        ) : (
+          <>
+            <p className="text-[13px] font-medium text-fg flex items-center gap-2 flex-wrap">
+              {unknown
+                ? <Badge variant="gray">Location unknown</Badge>
+                : inside
+                  ? <Badge variant="green" dot>Inside the office</Badge>
+                  : <Badge variant="orange" dot>Outside the office</Badge>}
+              {location.office && <span className="text-fg-muted font-normal">{location.office}</span>}
+              {location.distanceMeters != null && (
+                <span className="text-fg-subtle font-normal tabular-nums">
+                  {inside ? 'at the boundary' : `${formatDistance(location.distanceMeters)} from the boundary`}
+                </span>
+              )}
+            </p>
+            {location.assignedOffice && (
+              <p className="text-[12px] text-fg-muted">
+                Your assigned office is <span className="font-medium text-fg">{location.assignedOffice.name}</span>.
+              </p>
+            )}
+            {location.seenAt && (
+              <p className="text-[12px] text-fg-subtle">
+                Last position {dateTime(location.seenAt)}
+                {location.stale ? ' — too old to be treated as "now"' : ''}.
+              </p>
+            )}
+            {lastEvent && (
+              <p className="text-[12px] text-fg-subtle">
+                Last crossing: {lastEvent.type === 'ENTER' ? 'entered' : 'left'} at {dateTime(lastEvent.at)}.
+              </p>
+            )}
+            <p className="text-[11.5px] text-fg-subtle">
+              Browsers only report your position while the app is open, so this status can be minutes old. It never
+              marks you absent — leaving the office is recorded as a crossing, not as a missed shift.
+            </p>
+          </>
+        )}
+      </div>
     </Card>
   );
 }
@@ -703,6 +804,7 @@ export default function AttendancePage() {
         {tab === 'me' ? (
           <div className="space-y-5">
             <CheckInWidget />
+            <MyOfficeStatusCard />
             <FaceIdCard />
             <MyHistory />
             {user?.id && <RegisterSection canEdit={false} onlyUserId={user.id} />}

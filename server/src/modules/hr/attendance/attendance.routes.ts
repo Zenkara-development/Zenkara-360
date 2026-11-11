@@ -3,6 +3,7 @@ import { authenticate, requireRole, ALL_USERS, MANAGERS, ADMIN } from '../../../
 import * as c from './attendance.controller';
 import * as a from './attendanceAdmin.controller';
 import * as f from './attendanceFace.controller';
+import * as g from './attendanceGeofence.controller';
 
 const router = Router();
 router.use(authenticate);
@@ -12,6 +13,11 @@ router.post('/check-in',  requireRole(...ALL_USERS), c.checkIn);
 router.post('/check-out', requireRole(...ALL_USERS), c.checkOut);
 router.get('/me',         requireRole(...ALL_USERS), c.myAttendance);
 router.post('/heartbeat', requireRole(...ALL_USERS), c.heartbeat);
+
+// Geofence status for the caller. GET answers from what the server already
+// knows (no GPS prompt); POST evaluates a fix the browser just obtained.
+router.get('/my-location',  requireRole(...ALL_USERS), g.myLocation);
+router.post('/my-location', requireRole(...ALL_USERS), g.reportMyLocation);
 
 // Face verification — policy is readable by everyone (the check-in UI needs
 // it), editable by managers; enrolment is self-service, reset is self or manager.
@@ -68,5 +74,15 @@ router.get('/office-locations',        requireRole(...MANAGERS), c.listOfficeLoc
 router.post('/office-locations',       requireRole(...MANAGERS), c.createOfficeLocation);
 router.patch('/office-locations/:id',  requireRole(...MANAGERS), c.updateOfficeLocation);
 router.delete('/office-locations/:id', requireRole(...MANAGERS), c.deleteOfficeLocation);
+// Boundary crossings and who is inside where. The literal path comes first
+// so it can never be mistaken for an office id.
+//
+// The route is open to every staff role because a TEAM LEAD may review the
+// movements of their own team; the controller decides what each caller may
+// actually see (see reviewScope()).
+router.get('/office-locations/presence',   requireRole(...ALL_USERS), g.officePresence);
+router.get('/office-locations/:id/events', requireRole(...ALL_USERS), g.officeEvents);
+// Address search for the geofence map editor.
+router.get('/geocode',                 requireRole(...MANAGERS), g.searchAddress);
 
 export { router as attendanceRouter };

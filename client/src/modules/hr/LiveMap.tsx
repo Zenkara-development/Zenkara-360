@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { MapContainer, TileLayer, Circle, CircleMarker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Polygon, CircleMarker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Crosshair, RefreshCw, MapPin, Clock, Route } from 'lucide-react';
 import { api } from '../../api/client';
 import { Card, CardHeader, Button, Badge, Avatar, Alert, EmptyState, SkeletonCard, Input } from '../../shared/components';
 import { useFormat } from '../../hooks/useFormat';
+import { polygonToPoints } from './attendance/PolygonGeofenceEditor';
 
-interface Office { id: string; name: string; latitude: number; longitude: number; radiusMeters: number }
+interface Office {
+  id: string; name: string; latitude: number; longitude: number; radiusMeters: number;
+  geofenceType?: string | null;
+  polygon?: { type: 'Polygon'; coordinates: number[][][] } | null;
+}
 interface Person {
   user: { id: string; name: string; role: string; avatarUrl?: string | null; department?: string | null };
   recordId: string;
@@ -70,6 +75,17 @@ export function LiveMap() {
   const trailPts = useMemo<[number, number][]>(() => (trail?.pings ?? []).map(p => [p.lat, p.lng]), [trail]);
   const selectedPerson = people.find(p => p.user.id === selected) ?? null;
 
+  /** A polygon office is drawn as its boundary; a circular one as its radius. */
+  const officeShapes = useMemo(() => offices.map(o => {
+    const ring = polygonToPoints(o.polygon ?? null);
+    const isPolygon = (o.geofenceType || 'CIRCLE') === 'POLYGON' && ring.length >= 3;
+    return {
+      office: o,
+      isPolygon,
+      positions: ring.map(p => [p.lat, p.lng] as [number, number]),
+    };
+  }), [offices]);
+
   if (isLoading) return <SkeletonCard lines={8} />;
   if (error) {
     const msg = (error as any)?.response?.data?.error || 'Could not load live locations.';
@@ -101,10 +117,16 @@ export function LiveMap() {
             <MapContainer center={points[0]} zoom={14} scrollWheelZoom className="h-full w-full">
               <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
               <FitBounds points={selected && trailPts.length ? trailPts : points} />
-              {offices.map(o => (
-                <Circle key={o.id} center={[o.latitude, o.longitude]} radius={o.radiusMeters} pathOptions={{ color: '#4f46e5', fillColor: '#4f46e5', fillOpacity: 0.08, weight: 1.5 }}>
-                  <Tooltip direction="top" permanent={false}>{o.name} · {o.radiusMeters} m</Tooltip>
-                </Circle>
+              {officeShapes.map(({ office: o, isPolygon, positions }) => (
+                isPolygon ? (
+                  <Polygon key={o.id} positions={positions} pathOptions={{ color: '#4f46e5', fillColor: '#4f46e5', fillOpacity: 0.08, weight: 1.5 }}>
+                    <Tooltip direction="top" permanent={false}>{o.name} · boundary</Tooltip>
+                  </Polygon>
+                ) : (
+                  <Circle key={o.id} center={[o.latitude, o.longitude]} radius={o.radiusMeters} pathOptions={{ color: '#4f46e5', fillColor: '#4f46e5', fillOpacity: 0.08, weight: 1.5 }}>
+                    <Tooltip direction="top" permanent={false}>{o.name} · {o.radiusMeters} m</Tooltip>
+                  </Circle>
+                )
               ))}
               {selected && trailPts.length > 1 && (
                 <Polyline positions={trailPts} pathOptions={{ color: '#4f46e5', weight: 3, opacity: 0.7, dashArray: '6 6' }} />

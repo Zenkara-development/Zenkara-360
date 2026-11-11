@@ -1,9 +1,13 @@
 import { Response, NextFunction } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../../utils/prisma';
 import { AuthRequest } from '../../../middleware/authenticate';
 import { AppError } from '../../../middleware/errorHandler';
-import { verifyAgainstOfficesResolved, extractClientIp, sumWorkedMinutes, detectPtrHostname, checkHostnameAgainstIp, distanceMeters } from '../../../utils/attendanceVerification';
+import { verifyAgainstOfficesResolved, extractClientIp, sumWorkedMinutes, detectPtrHostname, checkHostnameAgainstIp, distanceMeters, distanceFromOffice } from '../../../utils/attendanceVerification';
+import { parsePolygon, validatePolygon, toGeoJsonPolygon } from '../../../utils/geoPolygon';
+import { recordTransition, lastGeofenceEvent, isUsableAccuracy, type GeofenceEventType } from '../../../utils/attendanceGeofenceEvents';
+import { locationTrackingEnabled } from '../../../utils/attendanceAutoCheckout';
 import { sseManager, SSEEvent } from '../../../utils/sse';
 import { logAction } from '../../../utils/auditLog';
 import {
@@ -39,6 +43,8 @@ interface VerifiedSignals {
   faceOk: boolean | null;
   faceDistance: number | null;
   ip: string;
+  /** The geofence verdict, kept so the caller can record the crossing. */
+  geo: { matchedLocationId: string | null; matchedLocationName: string | null; nearestDistanceMeters: number | null; locationOk: boolean } | null;
 }
 
 /**
@@ -106,7 +112,46 @@ async function verifySignals(
     rule, passed: outcome.passed, ip,
     locationOk: geo.locationOk, networkOk: geo.networkOk,
     faceOk: rule.face ? results.face : null, faceDistance,
+    geo: {
+      matchedLocationId: geo.matchedLocationId,
+      matchedLocationName: geo.matchedLocationName,
+      nearestDistanceMeters: geo.nearestDistanceMeters,
+      locationOk: geo.locationOk,
+    },
   };
+}
+
+/**
+ * Records the boundary crossing implied by a check-in or a check-out.
+ *
+ * Only for organisations that have actually opted into location tracking —
+ * an org that hasn't must not accumulate a trail of where its people were.
+ * The transition rule means a check-in while already recorded as "inside"
+ * writes nothing, so the same arrival never produces two events.
+ */
+async function recordCheckInCrossing(
+  orgId: string,
+  userId: string,
+  recordId: string,
+  v: VerifiedSignals,
+  lat: number,
+  lng: number,
+  source: 'CHECK_IN' | 'CHECK_OUT' = 'CHECK_IN',
+) {
+  try {
+    const policy = await getOrCreateAttendancePolicy(orgId);
+    if (!locationTrackingEnabled(policy)) return;
+    await recordTransition({
+      orgId, userId, recordId,
+      officeLocationId: v.geo?.matchedLocationId ?? null,
+      officeName: v.geo?.matchedLocationName ?? null,
+      inside: v.geo?.locationOk ?? null,
+      lat, lng, accuracy: null,
+      source,
+    });
+  } catch {
+    // A failed event write must never fail the check-in itself.
+  }
 }
 
 /** POST /hr/attendance/check-in — starts a new session; a day can have several. */
@@ -141,6 +186,7 @@ export async function checkIn(req: AuthRequest, res: Response, next: NextFunctio
     });
 
     logAction(userId, 'CREATE', 'AttendanceRecord', record.id, { action: 'check_in', passed: v.passed, faceVerified: v.faceOk ?? undefined });
+    await recordCheckInCrossing(orgId, userId, record.id, v, lat, lng);
     sseManager.broadcastAll(orgId, SSEEvent.ATTENDANCE_UPDATED, { userId, type: 'check_in' });
     res.json(record);
   } catch (err) { next(err); }
@@ -178,6 +224,7 @@ export async function checkOut(req: AuthRequest, res: Response, next: NextFuncti
     });
 
     logAction(userId, 'UPDATE', 'AttendanceRecord', record.id, { action: 'check_out', passed: v.passed, faceVerified: v.faceOk ?? undefined });
+    await recordCheckInCrossing(orgId, userId, record.id, v, lat, lng, 'CHECK_OUT');
     sseManager.broadcastAll(orgId, SSEEvent.ATTENDANCE_UPDATED, { userId, type: 'check_out' });
     res.json(record);
   } catch (err) { next(err); }
@@ -298,12 +345,79 @@ export async function manualEntry(req: AuthRequest, res: Response, next: NextFun
 
 const OfficeLocationSchema = z.object({
   name: z.string().min(1),
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  radiusMeters: z.number().int().min(10).max(50000).default(150),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
+  radiusMeters: z.number().int().min(10).max(50000).optional(),
   allowedIps: z.string().optional().nullable(),
   isActive: z.boolean().optional(),
+  /** CIRCLE (the original centre + radius) or POLYGON (a drawn boundary). */
+  geofenceType: z.enum(['CIRCLE', 'POLYGON']).optional(),
+  /** GeoJSON Polygon — see utils/geoPolygon.ts. Validated here, never trusted. */
+  polygon: z.unknown().optional().nullable(),
 });
+
+/**
+ * Turns a submitted office location into the row to store.
+ *
+ * The polygon is validated on the server — three points minimum, in range,
+ * no self-intersection, non-zero area — and the centre is derived from it,
+ * so `latitude`/`longitude` always describe the office even when the
+ * boundary is an irregular shape. A circle keeps the values the admin typed.
+ */
+type OfficeLocationInput = {
+  name?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
+  allowedIps?: string | null;
+  isActive?: boolean;
+  geofenceType?: 'CIRCLE' | 'POLYGON';
+  polygon?: unknown;
+};
+
+function officeLocationData(
+  data: OfficeLocationInput,
+  existing?: { name: string; latitude: number; longitude: number; radiusMeters: number; geofenceType: string; polygon: unknown } | null,
+) {
+  const type = (data.geofenceType ?? existing?.geofenceType ?? 'CIRCLE').toUpperCase();
+  const name = data.name ?? existing?.name;
+  if (!name) throw new AppError(400, 'This office needs a name.');
+
+  if (type === 'POLYGON') {
+    const ring = parsePolygon(data.polygon ?? existing?.polygon);
+    if (!ring) {
+      throw new AppError(400, 'This office needs a boundary — draw at least three points on the map.');
+    }
+    const check = validatePolygon(ring);
+    if (!check.ok) throw new AppError(400, check.error);
+    return {
+      name,
+      geofenceType: 'POLYGON',
+      polygon: toGeoJsonPolygon(ring) as any,
+      areaSquareMeters: check.areaSquareMeters,
+      latitude: check.centroid.lat,
+      longitude: check.centroid.lng,
+      // Kept for the legacy fields; the polygon check never uses it.
+      radiusMeters: existing?.radiusMeters ?? 150,
+    };
+  }
+
+  const latitude = data.latitude ?? existing?.latitude;
+  const longitude = data.longitude ?? existing?.longitude;
+  if (latitude == null || longitude == null) {
+    throw new AppError(400, 'This office needs a latitude and longitude.');
+  }
+  return {
+    name,
+    geofenceType: 'CIRCLE',
+    // Switching back to a circle clears any boundary that was drawn before.
+    polygon: Prisma.DbNull,
+    areaSquareMeters: null,
+    latitude,
+    longitude,
+    radiusMeters: data.radiusMeters ?? existing?.radiusMeters ?? 150,
+  };
+}
 
 export async function listOfficeLocations(req: AuthRequest, res: Response, next: NextFunction) {
   try {
@@ -354,7 +468,9 @@ export async function checkHost(req: AuthRequest, res: Response, next: NextFunct
 export async function createOfficeLocation(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const data = OfficeLocationSchema.parse(req.body);
-    const location = await prisma.officeLocation.create({ data: { ...data, orgId: req.user!.orgId } });
+    const payload = officeLocationData(data);
+    const location = await prisma.officeLocation.create({ data: { ...payload, orgId: req.user!.orgId } });
+    logAction(req.user!.id, 'CREATE', 'OfficeLocation', location.id, { geofenceType: payload.geofenceType });
     res.status(201).json(location);
   } catch (err) { next(err); }
 }
@@ -364,7 +480,16 @@ export async function updateOfficeLocation(req: AuthRequest, res: Response, next
     const data = OfficeLocationSchema.partial().parse(req.body);
     const existing = await prisma.officeLocation.findFirst({ where: { id: req.params.id, orgId: req.user!.orgId } });
     if (!existing) throw new AppError(404, 'Office location not found');
-    const location = await prisma.officeLocation.update({ where: { id: req.params.id }, data });
+    const payload = officeLocationData(data, existing);
+    const location = await prisma.officeLocation.update({
+      where: { id: existing.id },
+      data: {
+        ...payload,
+        ...(data.allowedIps !== undefined ? { allowedIps: data.allowedIps || null } : {}),
+        ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+      },
+    });
+    logAction(req.user!.id, 'UPDATE', 'OfficeLocation', location.id, { geofenceType: payload.geofenceType });
     res.json(location);
   } catch (err) { next(err); }
 }
@@ -576,7 +701,7 @@ export async function liveLocations(req: AuthRequest, res: Response, next: NextF
         include: { user: { select: { id: true, name: true, role: true, avatarUrl: true, department: true } } },
         orderBy: { checkInAt: 'asc' },
       }),
-      prisma.officeLocation.findMany({ where: { orgId, isActive: true }, select: { id: true, name: true, latitude: true, longitude: true, radiusMeters: true } }),
+      prisma.officeLocation.findMany({ where: { orgId, isActive: true }, select: { id: true, name: true, latitude: true, longitude: true, radiusMeters: true, geofenceType: true, polygon: true } }),
     ]);
     const now = Date.now();
     res.json({
@@ -587,7 +712,7 @@ export async function liveLocations(req: AuthRequest, res: Response, next: NextF
         const lng = s.lastSeenLng ?? s.checkInLng;
         const seenAt = s.lastSeenAt ?? s.checkInAt;
         const nearest = lat != null && lng != null && offices.length
-          ? offices.reduce((best, o) => { const d = distanceMeters(lat, lng, o.latitude, o.longitude); return d < best.d ? { d, name: o.name } : best; }, { d: Infinity, name: '' })
+          ? offices.reduce((best, o) => { const d = distanceFromOffice(o, { lat, lng }); return d < best.d ? { d, name: o.name } : best; }, { d: Infinity, name: '' })
           : null;
         return {
           user: s.user,
