@@ -49,6 +49,7 @@ router.put('/template',  requireRole(...MANAGERS), c.saveTemplate);
 
 // Payslip templates (phase 4): many per org, layouts, field visibility, assignment.
 router.get('/templates',                 requireRole(...MANAGERS), tpl.listTemplates);
+router.get('/templates/custom-starter', requireRole(...MANAGERS), tpl.customStarter);
 router.post('/templates',                requireRole(...MANAGERS), tpl.createTemplate);
 router.post('/templates/preview',        requireRole(...MANAGERS), tpl.previewDraftTemplate);
 router.get('/templates/:id/preview',     requireRole(...MANAGERS), tpl.previewTemplate);

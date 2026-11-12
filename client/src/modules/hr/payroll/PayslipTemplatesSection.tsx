@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Palette, Plus, Pencil, Copy, Trash2, Star, Eye, FileDown } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Palette, Plus, Pencil, Copy, Trash2, Star, Eye, FileDown, FileCode2 } from 'lucide-react';
 import {
   Card, CardHeader, Button, Modal, Badge, Field, Input, Textarea, Checkbox, Alert, SkeletonTable, IconButton, EmptyState, Label,
 } from '../../../shared/components';
@@ -9,6 +10,7 @@ import {
   type PayslipTemplate, type TemplateInput, type LayoutKey,
 } from '../../../api/payslipTemplates';
 import { useDebounce } from '../../../hooks/useDebounce';
+import { HtmlPayslipDesigner } from './HtmlPayslipDesigner';
 
 const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN', 'CONSULTANT', 'TEMPORARY'];
 const human = (s: string) => s.replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase());
@@ -33,6 +35,7 @@ const toPayload = (f: Form): Partial<TemplateInput> => {
 };
 
 export function PayslipTemplatesSection() {
+  const qc = useQueryClient();
   const { data, isLoading } = usePayslipTemplates();
   const save = useSaveTemplate();
   const remove = useDeleteTemplate();
@@ -40,17 +43,23 @@ export function PayslipTemplatesSection() {
   const { data: departments } = useDepartments();
   const { data: locations } = useLocations();
   const [editing, setEditing] = useState<PayslipTemplate | 'new' | null>(null);
+  const [designing, setDesigning] = useState<PayslipTemplate | 'new' | null>(null);
   const [notice, setNotice] = useState('');
   const deptName = (id: string) => departments?.data?.find(d => d.id === id)?.name ?? id;
   const locName = (id: string) => locations?.data?.find(l => l.id === id)?.name ?? id;
-  const layoutName = (k: string) => data?.layouts.find(l => l.key === k)?.name ?? k;
+  const layoutName = (k: string) => (k === 'CUSTOM_HTML' ? 'Custom HTML' : data?.layouts.find(l => l.key === k)?.name ?? k);
 
   return (
     <Card>
       <CardHeader
         title="Payslip templates" icon={<Palette size={14} />} className="mb-3"
         subtitle="Design one or more layouts. The default applies to everyone; other templates apply to the departments, locations or employment types you assign."
-        actions={<Button size="sm" icon={<Plus size={14} />} onClick={() => setEditing('new')}>New template</Button>}
+        actions={<>
+          <Button size="sm" variant="secondary" icon={<FileCode2 size={14} />} onClick={() => setDesigning('new')}>
+            &lt;/&gt; Start from HTML
+          </Button>
+          <Button size="sm" icon={<Plus size={14} />} onClick={() => setEditing('new')}>New template</Button>
+        </>}
       />
       {notice && <Alert tone="info" className="mb-3" onDismiss={() => setNotice('')}>{notice}</Alert>}
       {isLoading || !data ? <SkeletonTable rows={3} /> : data.templates.length === 0 ? (
@@ -67,7 +76,7 @@ export function PayslipTemplatesSection() {
                     {t.isDefault && <Badge variant="accent">Default</Badge>}
                     {!t.isActive && <Badge variant="gray">Inactive</Badge>}
                   </div>
-                  <p className="text-xs text-fg-subtle mt-0.5">{layoutName(t.layout)} layout · {t.payslipCount ?? 0} payslip{t.payslipCount === 1 ? '' : 's'} issued</p>
+                  <p className="text-xs text-fg-subtle mt-0.5">{layoutName(t.layout)}{t.layout === 'CUSTOM_HTML' ? '' : ' layout'} · {t.payslipCount ?? 0} payslip{t.payslipCount === 1 ? '' : 's'} issued</p>
                   {!t.isDefault && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {(t.applicability?.departmentIds ?? []).map(id => <Badge key={id} variant="blue">{deptName(id)}</Badge>)}
@@ -79,6 +88,7 @@ export function PayslipTemplatesSection() {
                 </div>
                 <div className="flex items-center shrink-0">
                   {!t.isDefault && t.isActive && <IconButton label="Make default" icon={<Star size={14} />} onClick={() => save.mutate({ id: t.id, isDefault: true })} />}
+                  {t.layout === 'CUSTOM_HTML' && <IconButton label="Edit in the HTML designer" icon={<FileCode2 size={14} />} onClick={() => setDesigning(t)} />}
                   <IconButton label="Preview PDF" icon={<FileDown size={14} />} onClick={() => downloadPdf(`/hr/payroll/templates/${t.id}/preview?format=pdf`, `${t.name}-sample.pdf`, true)} />
                   <IconButton label="Duplicate" icon={<Copy size={14} />} onClick={() => duplicate.mutate(t.id)} />
                   <IconButton label="Edit" icon={<Pencil size={14} />} onClick={() => setEditing(t)} />
@@ -95,6 +105,15 @@ export function PayslipTemplatesSection() {
           layouts={data.layouts} fields={data.fields}
           departments={departments?.data ?? []} locations={locations?.data ?? []}
           onClose={() => setEditing(null)}
+        />
+      )}
+      {designing && data?.custom && (
+        <HtmlPayslipDesigner
+          open
+          template={designing === 'new' ? null : designing}
+          custom={data.custom}
+          onClose={() => setDesigning(null)}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['payslip-templates'] })}
         />
       )}
     </Card>

@@ -13,14 +13,29 @@ import { sendMail } from '../../../utils/mailer';
 import {
   LAYOUTS, PAYSLIP_FIELDS, buildPayslipDoc, samplePayslipDoc, renderPayslipHtml, renderPayslipPdf, renderPayslipBundlePdf, type PayslipDoc,
 } from '../../../utils/payslipRender';
+import {
+  CUSTOM_VARIABLES, CUSTOM_KEY, validateCustomTemplate, isCustomTemplate,
+  MAX_CUSTOM_HTML_CHARS, MAX_CUSTOM_CSS_CHARS,
+} from '../../../utils/payslipCustomRender';
+import { STARTER_HTML, STARTER_CSS } from '../../../utils/payslipCustomStarter';
 
 const MANAGER_ROLES = ['SUPER_ADMIN', 'IT_MANAGER', 'CRM_MANAGER'];
 const emptyToNull = (v: unknown) => (v === '' ? null : v);
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
+export const CUSTOM_LAYOUT = 'CUSTOM_HTML';
+
+/** The administrator's own markup and stylesheet for a custom template. */
+const CustomPayloadSchema = z.object({
+  html: z.string().max(MAX_CUSTOM_HTML_CHARS),
+  css: z.string().max(MAX_CUSTOM_CSS_CHARS),
+  orientation: z.enum(['portrait', 'landscape']).optional(),
+  fontFamily: z.string().max(120).optional(),
+});
+
 const TemplateSchema = z.object({
   name: z.string().min(1).max(80),
-  layout: z.enum(['STANDARD', 'MODERN', 'MINIMAL', 'DETAILED', 'COMPACT', 'CORPORATE', 'BRANCH', 'STATEMENT']).default('STANDARD'),
+  layout: z.enum(['STANDARD', 'MODERN', 'MINIMAL', 'DETAILED', 'COMPACT', 'CORPORATE', 'BRANCH', 'STATEMENT', CUSTOM_LAYOUT]).default('STANDARD'),
   isDefault: z.boolean().optional(),
   isActive: z.boolean().optional(),
   companyName: z.preprocess(emptyToNull, z.string().nullable().optional()),
@@ -36,12 +51,45 @@ const TemplateSchema = z.object({
   signatoryName: z.preprocess(emptyToNull, z.string().max(80).nullable().optional()),
   signatureUrl: z.preprocess(emptyToNull, z.string().url().nullable().optional()),
   showFields: z.record(z.boolean()).nullable().optional(),
+  /** The custom markup — only for a CUSTOM_HTML template. */
+  custom: CustomPayloadSchema.nullable().optional(),
   applicability: z.object({
     departmentIds: z.array(z.string()).optional(),
     locationIds: z.array(z.string()).optional(),
     employmentTypes: z.array(z.string()).optional(),
+    /** Specific employees this template is pinned to. */
+    userIds: z.array(z.string()).optional(),
   }).nullable().optional(),
 });
+
+/**
+ * Merges the custom payload into the template's stored settings.
+ *
+ * The markup lives in the template's existing `showFields` JSON column under
+ * the reserved key `_custom` — so no schema change is needed, and the eight
+ * built-in layouts keep their own row shape untouched.
+ */
+function mergeCustom(
+  showFields: Record<string, boolean> | null | undefined,
+  custom: { html: string; css: string; orientation?: string; fontFamily?: string } | null | undefined,
+  layout: string,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(showFields ?? {}) };
+  if (layout === CUSTOM_LAYOUT && custom) {
+    const check = validateCustomTemplate(custom.html, custom.css);
+    if (!check.ok) throw new AppError(400, check.errors[0] ?? 'This template is not valid.');
+    out[CUSTOM_KEY] = {
+      html: custom.html,
+      css: custom.css,
+      orientation: custom.orientation === 'landscape' ? 'landscape' : 'portrait',
+      fontFamily: custom.fontFamily,
+    };
+  } else if (layout !== CUSTOM_LAYOUT) {
+    // Switching back to a built-in layout drops the custom markup.
+    delete out[CUSTOM_KEY];
+  }
+  return out;
+}
 
 /** Every org gets one template row; older orgs already have it (migrated from the single-letterhead model). */
 export async function ensureDefaultTemplate(orgId: string) {
@@ -61,12 +109,13 @@ async function employeeFor(orgId: string, userId: string) {
 }
 
 /** First active non-default template whose applicability matches, else the default. */
-export async function resolveTemplate(orgId: string, emp: { departmentId?: string | null; locationId?: string | null; employmentType?: string | null } | null) {
+export async function resolveTemplate(orgId: string, emp: { departmentId?: string | null; locationId?: string | null; employmentType?: string | null; userId?: string | null } | null) {
   const templates = await prisma.payslipTemplate.findMany({ where: { orgId, isActive: true }, orderBy: [{ isDefault: 'asc' }, { createdAt: 'asc' }] });
   if (templates.length === 0) return ensureDefaultTemplate(orgId);
   const matches = (t: any) => {
-    const a = (t.applicability ?? {}) as { departmentIds?: string[]; locationIds?: string[]; employmentTypes?: string[] };
+    const a = (t.applicability ?? {}) as { departmentIds?: string[]; locationIds?: string[]; employmentTypes?: string[]; userIds?: string[] };
     const rules = [
+      a.userIds?.length ? a.userIds.includes(emp?.userId ?? '') : null,
       a.departmentIds?.length ? a.departmentIds.includes(emp?.departmentId ?? '') : null,
       a.locationIds?.length ? a.locationIds.includes(emp?.locationId ?? '') : null,
       a.employmentTypes?.length ? a.employmentTypes.includes(emp?.employmentType ?? '') : null,
@@ -87,7 +136,20 @@ export async function listTemplates(req: AuthRequest, res: Response, next: NextF
       prisma.payslip.groupBy({ by: ['templateId'], where: { orgId, templateId: { not: null } }, _count: { _all: true } }),
     ]);
     const used = new Map(counts.map(c => [c.templateId, c._count._all]));
-    res.json({ templates: templates.map(t => ({ ...t, payslipCount: used.get(t.id) ?? 0 })), layouts: LAYOUTS.map(({ key, name, description, defaults }) => ({ key, name, description, defaults })), fields: PAYSLIP_FIELDS });
+    res.json({
+      templates: templates.map(t => ({ ...t, payslipCount: used.get(t.id) ?? 0, isCustom: isCustomTemplate(t) })),
+      layouts: LAYOUTS.map(({ key, name, description, defaults }) => ({ key, name, description, defaults })),
+      fields: PAYSLIP_FIELDS,
+      /** The custom-HTML designer's building blocks. */
+      custom: { layout: CUSTOM_LAYOUT, variables: CUSTOM_VARIABLES, maxHtmlChars: MAX_CUSTOM_HTML_CHARS, maxCssChars: MAX_CUSTOM_CSS_CHARS },
+    });
+  } catch (err) { next(err); }
+}
+
+/** GET /templates/custom-starter — the ready-made template the designer opens with. */
+export async function customStarter(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    res.json({ html: STARTER_HTML, css: STARTER_CSS, variables: CUSTOM_VARIABLES, layout: CUSTOM_LAYOUT });
   } catch (err) { next(err); }
 }
 
@@ -96,9 +158,19 @@ export async function createTemplate(req: AuthRequest, res: Response, next: Next
     const orgId = req.user!.orgId;
     const data = TemplateSchema.parse(req.body);
     await ensureDefaultTemplate(orgId);
+    const showFields = mergeCustom(data.showFields, data.custom, data.layout);
     const t = await prisma.$transaction(async tx => {
       if (data.isDefault) await tx.payslipTemplate.updateMany({ where: { orgId }, data: { isDefault: false } });
-      return tx.payslipTemplate.create({ data: { orgId, ...data, isDefault: !!data.isDefault, isActive: data.isActive ?? true, showFields: data.showFields ?? undefined, applicability: data.applicability ?? undefined } });
+      return tx.payslipTemplate.create({
+        data: {
+          orgId, name: data.name, layout: data.layout, isDefault: !!data.isDefault, isActive: data.isActive ?? true,
+          companyName: data.companyName ?? null, companyAddress: data.companyAddress ?? null, logoUrl: data.logoUrl ?? null,
+          primaryColor: data.primaryColor, accentColor: data.accentColor ?? null, headerTitle: data.headerTitle,
+          headerNote: data.headerNote ?? null, footerNote: data.footerNote ?? null, showSignature: data.showSignature,
+          signatureLabel: data.signatureLabel, signatoryName: data.signatoryName ?? null, signatureUrl: data.signatureUrl ?? null,
+          showFields: showFields as any, applicability: data.applicability ?? undefined,
+        },
+      });
     });
     logAction(req.user!.id, 'CREATE', 'PayslipTemplate', t.id, { name: t.name, layout: t.layout });
     res.status(201).json(t);
@@ -112,11 +184,39 @@ export async function updateTemplate(req: AuthRequest, res: Response, next: Next
     if (!existing) throw new AppError(404, 'Template not found');
     const data = TemplateSchema.partial().parse(req.body);
     if (existing.isDefault && (data.isDefault === false || data.isActive === false)) throw new AppError(400, 'Make another template the default first');
+    const layout = data.layout ?? existing.layout;
+    const showFields = mergeCustom(
+      data.showFields === undefined ? (existing.showFields as any) : data.showFields,
+      data.custom === undefined ? undefined : data.custom,
+      layout,
+    );
     const t = await prisma.$transaction(async tx => {
       if (data.isDefault) await tx.payslipTemplate.updateMany({ where: { orgId, id: { not: existing.id } }, data: { isDefault: false } });
-      return tx.payslipTemplate.update({ where: { id: existing.id }, data: { ...data, showFields: data.showFields === null ? undefined : data.showFields, applicability: data.applicability === null ? undefined : data.applicability } as any });
+      return tx.payslipTemplate.update({
+        where: { id: existing.id },
+        data: {
+          ...(data.name !== undefined ? { name: data.name } : {}),
+          ...(data.layout !== undefined ? { layout: data.layout } : {}),
+          ...(data.isDefault !== undefined ? { isDefault: data.isDefault } : {}),
+          ...(data.isActive !== undefined ? { isActive: data.isActive } : {}),
+          ...(data.companyName !== undefined ? { companyName: data.companyName } : {}),
+          ...(data.companyAddress !== undefined ? { companyAddress: data.companyAddress } : {}),
+          ...(data.logoUrl !== undefined ? { logoUrl: data.logoUrl } : {}),
+          ...(data.primaryColor !== undefined ? { primaryColor: data.primaryColor } : {}),
+          ...(data.accentColor !== undefined ? { accentColor: data.accentColor } : {}),
+          ...(data.headerTitle !== undefined ? { headerTitle: data.headerTitle } : {}),
+          ...(data.headerNote !== undefined ? { headerNote: data.headerNote } : {}),
+          ...(data.footerNote !== undefined ? { footerNote: data.footerNote } : {}),
+          ...(data.showSignature !== undefined ? { showSignature: data.showSignature } : {}),
+          ...(data.signatureLabel !== undefined ? { signatureLabel: data.signatureLabel } : {}),
+          ...(data.signatoryName !== undefined ? { signatoryName: data.signatoryName } : {}),
+          ...(data.signatureUrl !== undefined ? { signatureUrl: data.signatureUrl } : {}),
+          showFields: showFields as any,
+          ...(data.applicability === null ? { applicability: null } : data.applicability ? { applicability: data.applicability } : {}),
+        } as any,
+      });
     });
-    logAction(req.user!.id, 'UPDATE', 'PayslipTemplate', t.id, { name: t.name });
+    logAction(req.user!.id, 'UPDATE', 'PayslipTemplate', t.id, { name: t.name, layout: t.layout });
     res.json(t);
   } catch (err) { next(err); }
 }
@@ -217,7 +317,19 @@ export async function runPdf(req: AuthRequest, res: Response, next: NextFunction
 export async function previewTemplate(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const orgId = req.user!.orgId;
-    const template = req.params.id === 'draft' ? TemplateSchema.partial().parse({ ...(req.body ?? {}), name: req.body?.name || undefined }) : await prisma.payslipTemplate.findFirst({ where: { id: req.params.id, orgId } });
+    let template: any;
+    if (req.params.id === 'draft') {
+      const parsed = TemplateSchema.partial().parse({ ...(req.body ?? {}), name: req.body?.name || undefined });
+      // An unsaved draft carries its custom markup in the request body. The
+      // preview is deliberately NOT validated — a half-written document
+      // still deserves to be looked at. Validation happens on save.
+      const showFields = parsed.custom === undefined
+        ? parsed.showFields ?? undefined
+        : { ...(parsed.showFields ?? {}), [CUSTOM_KEY]: { ...(parsed.custom!), orientation: parsed.custom!.orientation ?? 'portrait' } };
+      template = { ...parsed, layout: parsed.layout ?? 'STANDARD', showFields };
+    } else {
+      template = await prisma.payslipTemplate.findFirst({ where: { id: req.params.id, orgId } });
+    }
     if (!template) throw new AppError(404, 'Template not found');
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { name: true, currency: true } });
     let doc: PayslipDoc;

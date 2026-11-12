@@ -1575,3 +1575,17 @@ html.dark .skeleton {
 .leaflet-container.leaflet-container .leaflet-pane {
   z-index: 0;
 }
+
+/* ─── Code editor (syntax highlighting) ──────────────────────────────────────
+ *
+ * The custom-HTML payslip editor paints its own tokens: the <textarea> is
+ * transparent and a highlighted <pre> sits underneath it, so the colours
+ * have to come from here.
+ */
+.tk-comment { color: #6b7280; font-style: italic; }
+.tk-tag     { color: #7c3aed; }
+.tk-attr    { color: #2563eb; }
+.tk-string  { color: #059669; }
+.tk-text    { color: #374151; }
+.tk-keyword { color: #db2777; font-weight: 600; }
+.tk-punct   { color: #9ca3af; }

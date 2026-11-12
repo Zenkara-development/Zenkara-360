@@ -14,6 +14,10 @@
  * so adding a ninth is a registry entry.
  */
 import PDFDocument from 'pdfkit';
+import {
+  customPayloadOf, renderCustomPayslipHtml, type CustomTemplatePayload,
+} from './payslipCustomRender';
+import { renderCustomPayslipPdf } from './payslipCustomPdf';
 
 // ─── Layout registry ─────────────────────────────────────────────────────────
 
@@ -101,6 +105,8 @@ export interface PayslipDoc {
   employerContributions: DocLine[];
   totals: { earnings: number; reimbursements: number; deductions: number; employer: number; net: number; ctcAnnual: number | null };
   netInWords: string;
+  /** The administrator's own markup, when this is a custom-HTML template. */
+  custom?: CustomTemplatePayload | null;
 }
 
 const MONTHS = ['', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -154,6 +160,7 @@ export function buildPayslipDoc(input: {
     days: p.paidDays != null ? { working: n(p.workingDays), paid: n(p.paidDays), present: n(p.presentDays), leave: n(p.leaveDays), half: n(p.halfDays), lop: n(p.lopDays), overtimeHours: n(p.overtimeHours) } : null,
     earnings, reimbursements, deductions, employerContributions, totals,
     netInWords: amountInWords(totals.net, org.currency || 'INR'),
+    custom: customPayloadOf(t),
   };
 }
 
@@ -216,6 +223,11 @@ export function amountInWords(amount: number, currency: string): string {
 const esc = (s: any) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 
 export function renderPayslipHtml(doc: PayslipDoc, opts: { embed?: boolean } = {}): string {
+  // A custom-HTML template renders the administrator's own markup (already
+  // sanitised, with the placeholders filled in).
+  if (doc.custom) {
+    return renderCustomPayslipHtml(doc, doc.custom, { orientation: doc.custom.orientation, fontFamily: doc.custom.fontFamily });
+  }
   const { layout: L, fields: F, brand: B } = doc;
   const fm = (v: number) => money(v, doc.currency, doc.locale);
   const fs = L.density === 'compact' ? 11 : L.density === 'airy' ? 13 : 12;
@@ -338,6 +350,11 @@ export function renderPayslipHtml(doc: PayslipDoc, opts: { embed?: boolean } = {
 function hex(c: string) { return /^#[0-9a-fA-F]{6}$/.test(c) ? c : '#2563eb'; }
 
 export async function renderPayslipPdf(doc: PayslipDoc, into?: PDFKit.PDFDocument): Promise<Buffer> {
+  // A custom-HTML template brings its own markup; the built-in layouts are
+  // drawn by drawPayslip() below.
+  if (doc.custom) {
+    return renderCustomPayslipPdf(doc, doc.custom, { orientation: doc.custom.orientation, fontFamily: doc.custom.fontFamily }, into);
+  }
   const own = !into;
   const pdf = into ?? new PDFDocument({ size: 'A4', margin: 40, info: { Title: doc.payslip.number, Author: doc.company.name } });
   const chunks: Buffer[] = [];
@@ -352,7 +369,14 @@ export async function renderPayslipBundlePdf(docs: PayslipDoc[]): Promise<Buffer
   const pdf = new PDFDocument({ size: 'A4', margin: 40, autoFirstPage: false, info: { Title: 'Payslips' } });
   const chunks: Buffer[] = [];
   pdf.on('data', c => chunks.push(c));
-  for (const d of docs) { pdf.addPage(); drawPayslip(pdf, d); }
+  for (const d of docs) {
+    pdf.addPage();
+    if (d.custom) {
+      await renderCustomPayslipPdf(d, d.custom, { orientation: d.custom.orientation, fontFamily: d.custom.fontFamily }, pdf);
+    } else {
+      drawPayslip(pdf, d);
+    }
+  }
   return new Promise(resolve => { pdf.on('end', () => resolve(Buffer.concat(chunks))); pdf.end(); });
 }
 
