@@ -18,6 +18,7 @@ import {
   customPayloadOf, renderCustomPayslipHtml, type CustomTemplatePayload,
 } from './payslipCustomRender';
 import { renderCustomPayslipPdf } from './payslipCustomPdf';
+import { renderStandardPayslipHtml, drawStandardPayslip } from './payslipStandard';
 
 // ─── Layout registry ─────────────────────────────────────────────────────────
 
@@ -228,6 +229,11 @@ export function renderPayslipHtml(doc: PayslipDoc, opts: { embed?: boolean } = {
   if (doc.custom) {
     return renderCustomPayslipHtml(doc, doc.custom, { orientation: doc.custom.orientation, fontFamily: doc.custom.fontFamily });
   }
+  // The Standard layout has a design of its own (see utils/payslipStandard.ts)
+  // rather than a variation of the shared one.
+  if (doc.layout.key === 'STANDARD') {
+    return renderStandardPayslipHtml(doc, opts);
+  }
   const { layout: L, fields: F, brand: B } = doc;
   const fm = (v: number) => money(v, doc.currency, doc.locale);
   const fs = L.density === 'compact' ? 11 : L.density === 'airy' ? 13 : 12;
@@ -381,6 +387,12 @@ export async function renderPayslipBundlePdf(docs: PayslipDoc[]): Promise<Buffer
 }
 
 function drawPayslip(pdf: PDFKit.PDFDocument, doc: PayslipDoc) {
+  // The Standard layout has a design of its own (see utils/payslipStandard.ts)
+  // rather than a variation of the shared one.
+  if (doc.layout.key === 'STANDARD') {
+    drawStandardPayslip(pdf, doc);
+    return;
+  }
   const { layout: L, fields: F, brand: B } = doc;
   const mono = L.header === 'plain';
   const primary = mono ? '#111827' : hex(B.primary);
