@@ -7,7 +7,7 @@ import { useUsers } from '../../../api/users';
 import { useFormat } from '../../../hooks/useFormat';
 import {
   useEmployeeSalaries, useSalaryComponents, usePayrollCycles, useSaveEmployeeSalary, usePreview, CATEGORY_LABEL,
-  type EmployeeSalary, type Overrides, type SalaryComponent, type Line,
+  type EmployeeSalary, type Overrides, type SalaryComponent, type StatutoryPreset, type Line,
 } from '../../../api/payroll';
 
 type Row = { code: string; amount: string; percent: string; formula: string; enabled: boolean; mode: 'default' | 'amount' | 'percent' | 'formula' };
@@ -31,6 +31,53 @@ function overridesFrom(rows: Row[]): Overrides {
     if (Object.keys(o).length) out[r.code] = o;
   }
   return out;
+}
+
+/* Share of the monthly CTC that becomes Basic when a CTC is typed in. */
+const CTC_BASIC_SHARE = 0.5;
+
+interface CtcSplit { monthly: number; basic: number; hra: number; employerPf: number; otherFixed: number; allowances: number }
+
+/** Work out how a monthly CTC breaks down: Basic is CTC_BASIC_SHARE of it,
+ *  HRA and employer PF follow their own component rules (as the payroll
+ *  engine would compute them), any other fixed earnings the form already
+ *  holds are kept, and Other Allowances takes whatever is left, so the
+ *  payslip adds back up to CTC ÷ 12. */
+function splitCtc(annual: number, rows: Row[], byCode: Map<string, SalaryComponent>, presets: Record<string, StatutoryPreset>): CtcSplit {
+  const monthly = annual / 12;
+  const basic = Math.round(monthly * CTC_BASIC_SHARE);
+  const enabled = (code: string) => rows.find(r => r.code === code && r.enabled);
+
+  let hra = 0;
+  const hraRow = enabled('HRA');
+  const hraComp = byCode.get('HRA');
+  if (hraRow && hraComp) {
+    if (hraRow.mode === 'amount') hra = Number(hraRow.amount) || 0;
+    else if (hraRow.mode === 'percent') hra = basic * (Number(hraRow.percent) || 0) / 100;
+    else if (hraRow.mode === 'default' && hraComp.calcType === 'PERCENT' && (hraComp.percentOf || 'BASIC') === 'BASIC') hra = basic * Number(hraComp.percent ?? 0) / 100;
+    else if (hraRow.mode === 'default' && hraComp.calcType === 'FIXED') hra = Number(hraComp.amount ?? 0);
+  }
+
+  // Employer PF is part of CTC but never paid out, so it comes off the top.
+  let employerPf = 0;
+  for (const r of rows) {
+    const c = byCode.get(r.code);
+    if (!r.enabled || c?.statutory !== 'PF_EMPLOYER') continue;
+    const cfg = { ...(presets.PF_EMPLOYER?.defaults ?? {}), ...(c.statutoryConfig ?? {}) };
+    const wages = cfg.onFullBasic ? basic : Math.min(basic, Number(cfg.wageCeiling ?? 15000));
+    employerPf += wages * Number(cfg.rate ?? 12) / 100;
+  }
+
+  let otherFixed = 0;
+  for (const r of rows) {
+    const c = byCode.get(r.code);
+    if (!r.enabled || !c || c.category !== 'EARNING' || ['BASIC', 'HRA', 'ALLOWANCES'].includes(r.code)) continue;
+    if (r.mode === 'amount') otherFixed += Number(r.amount) || 0;
+    else if (r.mode === 'default' && c.calcType === 'FIXED') otherFixed += Number(c.amount ?? 0);
+  }
+
+  const allowances = enabled('ALLOWANCES') ? Math.max(0, Math.round(monthly - basic - hra - employerPf - otherFixed)) : 0;
+  return { monthly, basic, hra: Math.round(hra), employerPf: Math.round(employerPf), otherFixed, allowances };
 }
 
 export function PayslipLines({ lines, totals, currencyMoney }: { lines: Line[]; totals: { earnings: number; deductions: number; reimbursements: number; employerContributions: number; net: number }; currencyMoney: (n: number | string) => string }) {
@@ -84,14 +131,29 @@ export function EmployeeSalariesSection() {
   const byCode = useMemo(() => new Map(components.map(c => [c.code, c])), [components]);
 
   const openCreate = () => {
-    setEditing(null); setUserId(''); setCycleId(cycles?.find(c => c.isDefault)?.id ?? ''); setCtc(''); setNotes('');
+    setEditing(null); setUserId(''); setCycleId(cycles?.find(c => c.isDefault)?.id ?? ''); setCtc(''); setSplit(null); setNotes('');
     setEffectiveFrom(new Date().toISOString().slice(0, 10)); setRows(rowsFrom(components, {})); setError(''); setOpen(true);
   };
   const openEdit = (s: EmployeeSalary) => {
-    setEditing(s); setUserId(s.userId); setCycleId(s.payrollCycleId ?? ''); setCtc(s.ctcAnnual ?? ''); setNotes(s.notes ?? '');
+    setEditing(s); setUserId(s.userId); setCycleId(s.payrollCycleId ?? ''); setCtc(s.ctcAnnual ?? ''); setSplit(null); setNotes(s.notes ?? '');
     setEffectiveFrom(new Date().toISOString().slice(0, 10)); setRows(rowsFrom(components, s.overrides ?? {})); setError(''); setOpen(true);
   };
   const setRow = (code: string, patch: Partial<Row>) => setRows(rs => rs.map(r => (r.code === code ? { ...r, ...patch } : r)));
+
+  /* Typing a CTC re-fills Basic and Other Allowances from it, which is what
+     moves the live preview; every line can still be edited afterwards. */
+  const [split, setSplit] = useState<CtcSplit | null>(null);
+  const changeCtc = (value: string) => {
+    setCtc(value);
+    const annual = Number(value);
+    if (value === '' || !(annual > 0)) { setSplit(null); return; }
+    const s = splitCtc(annual, rows, byCode, comps?.statutoryPresets ?? {});
+    setSplit(s);
+    setRows(rs => rs.map(r =>
+      r.code === 'BASIC' ? { ...r, enabled: true, mode: 'amount', amount: String(s.basic) }
+      : r.code === 'ALLOWANCES' && r.enabled ? { ...r, mode: 'amount', amount: String(s.allowances) }
+      : r));
+  };
 
   const overrides = useMemo(() => overridesFrom(rows), [rows]);
   const previewBody = open ? { userId: userId || undefined, overrides, ctcAnnual: ctc === '' ? null : Number(ctc), payrollCycleId: cycleId || undefined, attendance: false, inputs: Number(whatIfLop) > 0 ? { lopDays: Number(whatIfLop) } : undefined } : null;
@@ -136,7 +198,14 @@ export function EmployeeSalariesSection() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Employee" className="sm:col-span-2"><SearchableSelect value={userId} onChange={setUserId} options={employeeOptions} disabled={!!editing} ariaLabel="Employee" placeholder="Choose an employee" /></Field>
               <Field label="Payroll cycle"><Select value={cycleId} onChange={e => setCycleId(e.target.value)}>{(cycles ?? []).map(c => <option key={c.id} value={c.id}>{c.name} ({c.frequency.toLowerCase()})</option>)}</Select></Field>
-              <Field label="Annual CTC (optional)" hint="For CTC-based formulas and display"><Input type="number" min={0} value={ctc} onChange={e => setCtc(e.target.value)} /></Field>
+              <Field
+                label="Annual CTC (optional)"
+                hint={split
+                  ? `Per month: Basic ${money(split.basic)} · HRA ${money(split.hra)}${split.employerPf ? ` · Employer PF ${money(split.employerPf)}` : ''} · Other Allowances ${money(split.allowances)} = ${money(Math.round(split.monthly))}`
+                  : 'Typing a CTC fills Basic (50%) and Other Allowances; HRA and PF follow their rules. You can still edit each line.'}
+              >
+                <Input type="number" min={0} value={ctc} onChange={e => changeCtc(e.target.value)} />
+              </Field>
               <Field label="Effective from"><Input type="date" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)} /></Field>
               <Field label="Notes"><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="e.g. Annual revision" /></Field>
             </div>
